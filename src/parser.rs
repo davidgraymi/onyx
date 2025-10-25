@@ -19,7 +19,7 @@ impl<'a> Parser<'a> {
     /// Advances the parser to the next token.
     fn advance(&mut self) {
         // Fetch the next token from the iterator, or use EOF if none is available
-        self.current_token = self.lexer.next().unwrap_or_else(|| Token {
+        self.current_token = self.lexer.next().unwrap_or(Token {
             kind: TokenKind::Eof,
             span: self.current_token.span, // Use the last known position
         });

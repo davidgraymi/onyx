@@ -4,16 +4,12 @@ use crate::ast::PrimitiveType;
 
 // A minimal struct to track location in the source file for better errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
 }
 
-impl Default for Span {
-    fn default() -> Self {
-        Span { start: 0, end: 0 }
-    }
-}
 
 // The core token definition for the Onyx IDL.
 #[derive(Debug, PartialEq)]

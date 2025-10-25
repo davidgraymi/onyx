@@ -28,12 +28,12 @@ pub fn main() {
             println!("Successfully Parsed Onyx Module!\n");
             // Print the AST to verify structure
             for def in module.definitions {
-                println!("{:#?}", def);
+                println!("{def:#?}");
                 println!("---");
             }
         }
         Err(e) => {
-            eprintln!("Parsing Failed: {}", e);
+            eprintln!("Parsing Failed: {e}");
         }
     }
 }
