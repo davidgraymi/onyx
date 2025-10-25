@@ -1,19 +1,29 @@
 use std::fmt;
 
 // --- Helper Types ---
-
 #[derive(Debug, PartialEq, Clone)]
 pub enum PrimitiveType {
     Bool, U8, U16, U32, U64, I8, I16, I32, I64, F32, F64,
 }
 
 impl PrimitiveType {
+    /// Gets the size in bits of a primitive type.
     pub fn get_bit_width(&self) -> u64 {
         match self {
             PrimitiveType::Bool | PrimitiveType::U8 | PrimitiveType::I8 => 8,
             PrimitiveType::U16 | PrimitiveType::I16 => 16,
             PrimitiveType::U32 | PrimitiveType::I32 | PrimitiveType::F32 => 32,
             PrimitiveType::U64 | PrimitiveType::I64 | PrimitiveType::F64 => 64,
+        }
+    }
+
+    /// Gets the size in bytes of a primitive type.
+    pub fn get_byte_size(&self) -> usize {
+        match self {
+            PrimitiveType::Bool | PrimitiveType::U8 | PrimitiveType::I8 => 1,
+            PrimitiveType::U16 | PrimitiveType::I16 => 2,
+            PrimitiveType::U32 | PrimitiveType::I32 | PrimitiveType::F32 => 4,
+            PrimitiveType::U64 | PrimitiveType::I64 | PrimitiveType::F64 => 8,
         }
     }
 }
