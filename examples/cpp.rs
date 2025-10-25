@@ -36,13 +36,13 @@ pub fn main() {
         Ok(files) => {
             for (filename, content) in files {
                 println!("\n=============================================");
-                println!("--- GENERATED FILE: {} ---", filename);
+                println!("--- GENERATED FILE: {filename} ---");
                 println!("=============================================");
-                println!("{}", content);
+                println!("{content}");
             }
         }
         Err(e) => {
-            eprintln!("Code Generation Failed: {}", e);
+            eprintln!("Code Generation Failed: {e}");
         }
     }
 }

@@ -11,6 +11,12 @@ pub struct CppGenerator {
     file_stem: String,
 }
 
+impl Default for CppGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CppGenerator {
     pub fn new() -> Self {
         CppGenerator {
@@ -111,12 +117,12 @@ impl CppGenerator {
         for variant in &e.variants {
             let assigned_value = if let Some(val) = variant.value {
                 current_value = val;
-                format!(" = {}", val)
+                format!(" = {val}")
             } else {
                 let s = if current_value == 0 {
                     String::new()
                 } else {
-                    format!(" = {}", current_value)
+                    format!(" = {current_value}")
                 };
                 current_value += 1;
                 s
@@ -137,7 +143,7 @@ impl CppGenerator {
 
             let bit_field_suffix = if let Some(bits) = field.bit_field_size {
                 if bits > 0 {
-                    format!(" : {}", bits)
+                    format!(" : {bits}")
                 } else {
                     String::new()
                 }
@@ -169,7 +175,7 @@ impl CppGenerator {
 
             let bit_field_suffix = if let Some(bits) = field.bit_field_size {
                 if bits > 0 {
-                    format!(" : {}", bits)
+                    format!(" : {bits}")
                 } else {
                     String::new()
                 }
@@ -186,7 +192,7 @@ impl CppGenerator {
         }
 
         // Declare the static deserialization method
-        writeln!(self.header_output, "").unwrap();
+        writeln!(self.header_output).unwrap();
         writeln!(
             self.header_output,
             "  /// Attempts to deserialize {} from a raw buffer.",
@@ -222,11 +228,10 @@ impl CppGenerator {
 
         writeln!(
             self.source_output,
-            "  const size_t EXPECTED_SIZE = {};",
-            msg_size
+            "  const size_t EXPECTED_SIZE = {msg_size};"
         )
         .unwrap();
-        writeln!(self.source_output, "").unwrap();
+        writeln!(self.source_output).unwrap();
 
         writeln!(self.source_output, "  if (size < EXPECTED_SIZE) {{").unwrap();
         writeln!(
@@ -239,12 +244,12 @@ impl CppGenerator {
             "    // For now, we'll use cerr and return nothing."
         )
         .unwrap();
-        writeln!(self.source_output, "    std::cerr << \"[Onyx] Deserialize error: Buffer size (\" << size << \") is smaller than expected size (\" << EXPECTED_SIZE << \") for message {}\" << std::endl;", class_name).unwrap();
+        writeln!(self.source_output, "    std::cerr << \"[Onyx] Deserialize error: Buffer size (\" << size << \") is smaller than expected size (\" << EXPECTED_SIZE << \") for message {class_name}\" << std::endl;").unwrap();
         writeln!(self.source_output, "    return std::nullopt;").unwrap();
         writeln!(self.source_output, "  }}").unwrap();
-        writeln!(self.source_output, "").unwrap();
+        writeln!(self.source_output).unwrap();
 
-        writeln!(self.source_output, "  {} result;", class_name).unwrap();
+        writeln!(self.source_output, "  {class_name} result;").unwrap();
 
         // Copy the raw bytes directly into the message object
         writeln!(self.source_output, "  memcpy(").unwrap();
@@ -260,11 +265,11 @@ impl CppGenerator {
         )
         .unwrap();
         writeln!(self.source_output, "  );").unwrap();
-        writeln!(self.source_output, "").unwrap();
+        writeln!(self.source_output).unwrap();
 
         writeln!(self.source_output, "  return result;").unwrap();
         writeln!(self.source_output, "}}").unwrap();
-        writeln!(self.source_output, "").unwrap();
+        writeln!(self.source_output).unwrap();
 
         Ok(())
     }
@@ -281,32 +286,32 @@ impl CodeGenerator for CppGenerator {
         let namespace = "onyx";
 
         // --- Write Header File (.hpp) Declarations ---
-        writeln!(self.header_output, "namespace {} {{\n", namespace).unwrap();
-        writeln!(self.source_output, "namespace {} {{\n", namespace).unwrap();
+        writeln!(self.header_output, "namespace {namespace} {{\n").unwrap();
+        writeln!(self.source_output, "namespace {namespace} {{\n").unwrap();
 
         for def in &module.definitions {
             match def {
                 Definition::Enum(e) => {
                     // Enums go entirely in the header
                     self.write_enum(e)?;
-                    writeln!(self.header_output, "").unwrap();
+                    writeln!(self.header_output).unwrap();
                 }
                 Definition::Struct(s) => {
                     // Structs go entirely in the header
                     self.write_struct(s)?;
-                    writeln!(self.header_output, "").unwrap();
+                    writeln!(self.header_output).unwrap();
                 }
                 Definition::Message(m) => {
                     // Messages require both header (declaration) and source (definition)
                     self.write_message_declaration(m)?;
-                    writeln!(self.header_output, "").unwrap();
+                    writeln!(self.header_output).unwrap();
                     self.write_message_definition(m, namespace)?;
                 }
             }
         }
 
-        writeln!(self.header_output, "}} // namespace {}", namespace).unwrap();
-        writeln!(self.source_output, "}} // namespace {}", namespace).unwrap();
+        writeln!(self.header_output, "}} // namespace {namespace}").unwrap();
+        writeln!(self.source_output, "}} // namespace {namespace}").unwrap();
 
         Ok(vec![
             (
