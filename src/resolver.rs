@@ -64,7 +64,7 @@ fn resolve_packed_size_recursive(
         .get(def_name)
         .ok_or_else(|| CompileError(format!("Type '{def_name}' is used but not defined.")))?;
 
-    let size = match def {
+    let size_in_bits = match def {
         Definition::Enum(e) => e.underlying_type.get_bit_width(),
         Definition::Struct(s) => {
             get_struct_packed_size_bytes(s, def_map, packed_sizes, type_stack)?
@@ -74,11 +74,13 @@ fn resolve_packed_size_recursive(
         }
     };
 
+    let size_in_bytes = (size_in_bits + 7) / 8; // Ceiling division
+
     // 5. Unmark and store resolved size (exit recursion)
     type_stack.pop();
-    packed_sizes.insert(def_name.to_string(), size);
+    packed_sizes.insert(def_name.to_string(), size_in_bytes);
 
-    Ok(size)
+    Ok(size_in_bytes)
 }
 
 /// Calculates the size of a MessageDef by summing up its fields' resolved sizes.
