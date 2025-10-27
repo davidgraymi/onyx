@@ -74,7 +74,7 @@ fn resolve_packed_size_recursive(
         }
     };
 
-    let size_in_bytes = (size_in_bits + 7) / 8; // Ceiling division
+    let size_in_bytes = size_in_bits.div_ceil(8); // Ceiling division
 
     // 5. Unmark and store resolved size (exit recursion)
     type_stack.pop();

@@ -245,7 +245,7 @@ impl CppGenerator {
                         name = field.name
                     )
                     .unwrap(),
-                    Type::Primitive(p) => {
+                    Type::Primitive(_) => {
                         writeln!(self.source_output, "    packed.{name},", name = field.name)
                             .unwrap()
                     }
@@ -366,8 +366,7 @@ impl CppGenerator {
                 let integer_type = if *size == "4" { "uint32_t" } else { "uint64_t" };
                 writeln!(
                     self.header_output,
-                    "inline {cpp_type} byteswap({cpp_type} value) {{",
-                    cpp_type = cpp_type
+                    "inline {cpp_type} byteswap({cpp_type} value) {{"
                 )
                 .unwrap();
                 writeln!(self.header_output, "  {integer_type} temp;").unwrap();
@@ -393,8 +392,7 @@ impl CppGenerator {
                 // Handling for integer types
                 writeln!(
                     self.header_output,
-                    "inline {cpp_type} byteswap({cpp_type} value) {{",
-                    cpp_type = cpp_type
+                    "inline {cpp_type} byteswap({cpp_type} value) {{"
                 )
                 .unwrap();
                 writeln!(
@@ -415,8 +413,7 @@ impl CppGenerator {
         for (cpp_type, _, _) in swap_types {
             writeln!(
                 self.header_output,
-                "inline {cpp_type} byteswap_if_needed({cpp_type} value) {{",
-                cpp_type = cpp_type
+                "inline {cpp_type} byteswap_if_needed({cpp_type} value) {{"
             )
             .unwrap();
             writeln!(

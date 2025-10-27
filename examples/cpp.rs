@@ -3,7 +3,7 @@ use onyx::{
     parser::Parser,
 };
 
-use onyx::{resolver::resolve_module};
+use onyx::resolver::resolve_module;
 
 // This part would be in your main execution logic:
 pub fn main() {
