@@ -62,7 +62,7 @@ fn resolve_packed_size_recursive(
     // 4. Find definition
     let def = def_map
         .get(def_name)
-        .ok_or_else(|| CompileError(format!("Type '{}' is used but not defined.", def_name)))?;
+        .ok_or_else(|| CompileError(format!("Type '{def_name}' is used but not defined.")))?;
 
     let size = match def {
         Definition::Enum(e) => e.underlying_type.get_bit_width(),

@@ -130,18 +130,15 @@ impl<'a> Parser<'a> {
                         let max_bit_width = p
                             .get_bit_width()
                             .try_into()
-                            .or_else(|e| Err(ParseError(format!("Unexpected error: {e}"))))?;
-                        
+                            .map_err(|e| ParseError(format!("Unexpected error: {e}")))?;
+
                         if size <= max_bit_width {
                             self.advance();
                             Some(size as usize)
                         } else {
                             return Err(ParseError(format!(
-                                "Bit-field size {} exceeds type {}'s width of {} bits at position {}",
-                                size,
-                                format!("{:?}", p),
-                                p.get_bit_width(),
-                                self.current_token.span.start
+                                "Bit-field size {size} exceeds type {:?}'s width of {max_bit_width} bits at position {}",
+                                p, self.current_token.span.start
                             )));
                         }
                     }

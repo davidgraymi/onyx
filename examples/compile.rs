@@ -47,6 +47,6 @@ pub fn main() {
     };
 
     for (type_name, size) in size_table {
-        println!("Type: {}, Packed Size: {} bits", type_name, size);
+        println!("Type: {type_name}, Packed Size: {size} bits");
     }
 }
