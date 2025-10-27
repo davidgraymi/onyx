@@ -1,4 +1,12 @@
-use crate::{ast::{Definition, EnumDef, EnumVariant, Field, MessageDef, OnyxModule, ParseError, PrimitiveType, StructDef, Type}, lexer::{Lexer, Token, TokenKind}};
+use std::fmt;
+
+use crate::{
+    ast::{
+        Definition, EnumDef, EnumVariant, Field, MessageDef, OnyxModule, PrimitiveType, StructDef,
+        Type,
+    },
+    lexer::{Lexer, Token, TokenKind},
+};
 
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
@@ -10,10 +18,14 @@ impl<'a> Parser<'a> {
     pub fn new(source: &'a str) -> Result<Self, ParseError> {
         let mut lexer = Lexer::new(source);
         // Get the first token to start parsing
-        let current_token = lexer.next()
+        let current_token = lexer
+            .next()
             .ok_or_else(|| ParseError("Empty source file.".to_string()))?;
 
-        Ok(Parser { lexer, current_token })
+        Ok(Parser {
+            lexer,
+            current_token,
+        })
     }
 
     /// Advances the parser to the next token.
@@ -33,9 +45,7 @@ impl<'a> Parser<'a> {
         } else {
             let msg = format!(
                 "Expected {:?}, found {:?} at position {}",
-                expected,
-                self.current_token.kind,
-                self.current_token.span.start
+                expected, self.current_token.kind, self.current_token.span.start
             );
             Err(ParseError(msg))
         }
@@ -63,7 +73,10 @@ impl<'a> Parser<'a> {
             TokenKind::Struct => self.parse_struct(),
             TokenKind::Enum => self.parse_enum(),
             _ => {
-                let msg = format!("Expected 'message', 'struct', or 'enum', found {:?} at posiiton {}", self.current_token.kind, self.current_token.span.start);
+                let msg = format!(
+                    "Expected 'message', 'struct', or 'enum', found {:?} at posiiton {}",
+                    self.current_token.kind, self.current_token.span.start
+                );
                 Err(ParseError(msg))
             }
         }
@@ -76,7 +89,12 @@ impl<'a> Parser<'a> {
         let type_name = match &self.current_token.kind {
             TokenKind::Primitive(val) => Type::Primitive(val.clone()),
             TokenKind::Identifier(name) => Type::Custom(name.clone()),
-            _ => return Err(ParseError(format!("Expected a type name, found {:?} at position {}", self.current_token.kind, self.current_token.span.start))),
+            _ => {
+                return Err(ParseError(format!(
+                    "Expected a type name, found {:?} at position {}",
+                    self.current_token.kind, self.current_token.span.start
+                )));
+            }
         };
         self.advance();
         Ok(type_name)
@@ -86,7 +104,12 @@ impl<'a> Parser<'a> {
     fn parse_primitive_type(&mut self) -> Result<PrimitiveType, ParseError> {
         let primitive_type = match &self.current_token.kind {
             TokenKind::Primitive(val) => val.clone(),
-            _ => return Err(ParseError(format!("Expected a numeric primitive type, found {:?} at position {}", self.current_token.kind, self.current_token.span.start))),
+            _ => {
+                return Err(ParseError(format!(
+                    "Expected a numeric primitive type, found {:?} at position {}",
+                    self.current_token.kind, self.current_token.span.start
+                )));
+            }
         };
         self.advance();
         Ok(primitive_type)
@@ -98,18 +121,38 @@ impl<'a> Parser<'a> {
         let type_info = self.parse_type()?;
 
         // Optional bit field size
-        let bit_field_size: Option<u64> = if self.current_token.kind == TokenKind::Colon {
+        let bit_field_size: Option<usize> = if self.current_token.kind == TokenKind::Colon {
             self.advance();
 
             match &type_info {
                 Type::Primitive(p) => match self.current_token.kind {
-                    TokenKind::LiteralInt(size) if size <= p.get_bit_width() => {
-                        self.advance();
-                        Some(size)
+                    TokenKind::LiteralInt(size) => {
+                        let max_bit_width = p
+                            .get_bit_width()
+                            .try_into()
+                            .or_else(|e| Err(ParseError(format!("Unexpected error: {e}"))))?;
+                        
+                        if size <= max_bit_width {
+                            self.advance();
+                            Some(size as usize)
+                        } else {
+                            return Err(ParseError(format!(
+                                "Bit-field size {} exceeds type {}'s width of {} bits at position {}",
+                                size,
+                                format!("{:?}", p),
+                                p.get_bit_width(),
+                                self.current_token.span.start
+                            )));
+                        }
                     }
-                    _ => None
+                    _ => None,
                 },
-                _ => return Err(ParseError(format!("Expected integer literal for bit-field size, found {:?} at position {}", self.current_token.kind, self.current_token.span.start))),
+                _ => {
+                    return Err(ParseError(format!(
+                        "Expected integer literal for bit-field size, found {:?} at position {}",
+                        self.current_token.kind, self.current_token.span.start
+                    )));
+                }
             }
         } else {
             None
@@ -117,7 +160,11 @@ impl<'a> Parser<'a> {
 
         self.consume(TokenKind::Comma)?;
 
-        Ok(Field { name, type_info, bit_field_size })
+        Ok(Field {
+            name,
+            type_info,
+            bit_field_size,
+        })
     }
 
     /// Helper to consume an Identifier and return its string value.
@@ -125,7 +172,10 @@ impl<'a> Parser<'a> {
         let name = match &self.current_token.kind {
             TokenKind::Identifier(id) => id.clone(),
             _ => {
-                let msg = format!("Expected an identifier, found {:?} at position {}", self.current_token.kind, self.current_token.span.start);
+                let msg = format!(
+                    "Expected an identifier, found {:?} at position {}",
+                    self.current_token.kind, self.current_token.span.start
+                );
                 return Err(ParseError(msg));
             }
         };
@@ -139,7 +189,9 @@ impl<'a> Parser<'a> {
         self.consume(TokenKind::OpenBrace)?;
         let mut fields = Vec::new();
 
-        while self.current_token.kind != TokenKind::CloseBrace && self.current_token.kind != TokenKind::Eof {
+        while self.current_token.kind != TokenKind::CloseBrace
+            && self.current_token.kind != TokenKind::Eof
+        {
             fields.push(self.parse_field()?);
         }
 
@@ -162,43 +214,66 @@ impl<'a> Parser<'a> {
 
         Ok(Definition::Struct(StructDef { name, fields }))
     }
-    
+
     // --- Enum Parsing ---
 
     fn parse_enum(&mut self) -> Result<Definition, ParseError> {
         self.consume(TokenKind::Enum)?;
         let name = self.consume_identifier()?;
-        
+
         // Underlying type: 'enum Name: u32'
         self.consume(TokenKind::Colon)?;
         let underlying_type = self.parse_primitive_type()?;
 
         self.consume(TokenKind::OpenBrace)?;
-        
+
         let mut variants = Vec::new();
-        while self.current_token.kind != TokenKind::CloseBrace && self.current_token.kind != TokenKind::Eof {
+        while self.current_token.kind != TokenKind::CloseBrace
+            && self.current_token.kind != TokenKind::Eof
+        {
             let variant_name = self.consume_identifier()?;
             let mut value = None;
 
             // Optional explicit assignment: '= 10'
             if self.current_token.kind == TokenKind::Assign {
                 self.advance();
-                
+
                 let literal_value = match self.current_token.kind {
                     TokenKind::LiteralInt(v) => v,
-                    _ => return Err(ParseError(format!("Expected integer literal for enum assignment, found {:?} at position {}", self.current_token.kind, self.current_token.span.start))),
+                    _ => {
+                        return Err(ParseError(format!(
+                            "Expected integer literal for enum assignment, found {:?} at position {}",
+                            self.current_token.kind, self.current_token.span.start
+                        )));
+                    }
                 };
                 self.advance();
                 value = Some(literal_value);
             }
-            
+
             self.consume(TokenKind::Comma)?;
 
-            variants.push(EnumVariant { name: variant_name, value });
+            variants.push(EnumVariant {
+                name: variant_name,
+                value,
+            });
         }
 
         self.consume(TokenKind::CloseBrace)?;
 
-        Ok(Definition::Enum(EnumDef { name, underlying_type, variants }))
+        Ok(Definition::Enum(EnumDef {
+            name,
+            underlying_type,
+            variants,
+        }))
+    }
+}
+
+// A simple error type for parsing failures
+#[derive(Debug)]
+pub struct ParseError(pub String);
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Parse Error: {}", self.0)
     }
 }

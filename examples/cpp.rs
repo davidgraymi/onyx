@@ -1,4 +1,7 @@
-use onyx::{generators::{cpp::CppGenerator, CodeGenerator}, parser::Parser};
+use onyx::{
+    generators::{CodeGenerator, cpp::CppGenerator},
+    parser::Parser,
+};
 
 // This part would be in your main execution logic:
 pub fn main() {

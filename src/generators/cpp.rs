@@ -3,7 +3,7 @@ use std::fmt::Write;
 use crate::{
     ast::{Definition, EnumDef, Field, MessageDef, OnyxModule, PrimitiveType, StructDef, Type},
     generators::{CodeGenerator, CompileError},
-}; // Used for efficient string building
+};
 
 pub struct CppGenerator {
     header_output: String,

@@ -3,28 +3,28 @@ use std::{iter::Peekable, str::Chars};
 use crate::ast::PrimitiveType;
 
 // A minimal struct to track location in the source file for better errors.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
 }
 
-
 // The core token definition for the Onyx IDL.
 #[derive(Debug, PartialEq)]
 pub enum TokenKind {
     // Keywords
-    Message, Struct, Enum,
+    Message,
+    Struct,
+    Enum,
     // Primitive Types
     Primitive(PrimitiveType),
     // Delimiters and Operators
-    OpenBrace,      // {
-    CloseBrace,     // }
-    Comma,          // ,
-    Colon,          // :
-    Semicolon,      // ;
-    Assign,         // =
+    OpenBrace,  // {
+    CloseBrace, // }
+    Comma,      // ,
+    Colon,      // :
+    Semicolon,  // ;
+    Assign,     // =
     // Literals and Identifiers
     Identifier(String), // my_field, MyStructName
     LiteralInt(u64),    // 123
@@ -97,9 +97,16 @@ impl<'a> Lexer<'a> {
             "struct" => TokenKind::Struct,
             "enum" => TokenKind::Enum,
             "bool" => TokenKind::Primitive(PrimitiveType::Bool),
-            "u8" => TokenKind::Primitive(PrimitiveType::U8), "u16" => TokenKind::Primitive(PrimitiveType::U16), "u32" => TokenKind::Primitive(PrimitiveType::U32), "u64" => TokenKind::Primitive(PrimitiveType::U64),
-            "i8" => TokenKind::Primitive(PrimitiveType::I8), "i16" => TokenKind::Primitive(PrimitiveType::I16), "i32" => TokenKind::Primitive(PrimitiveType::I32), "i64" => TokenKind::Primitive(PrimitiveType::I64),
-            "f32" => TokenKind::Primitive(PrimitiveType::F32), "f64" => TokenKind::Primitive(PrimitiveType::F64),
+            "u8" => TokenKind::Primitive(PrimitiveType::U8),
+            "u16" => TokenKind::Primitive(PrimitiveType::U16),
+            "u32" => TokenKind::Primitive(PrimitiveType::U32),
+            "u64" => TokenKind::Primitive(PrimitiveType::U64),
+            "i8" => TokenKind::Primitive(PrimitiveType::I8),
+            "i16" => TokenKind::Primitive(PrimitiveType::I16),
+            "i32" => TokenKind::Primitive(PrimitiveType::I32),
+            "i64" => TokenKind::Primitive(PrimitiveType::I64),
+            "f32" => TokenKind::Primitive(PrimitiveType::F32),
+            "f64" => TokenKind::Primitive(PrimitiveType::F64),
             _ => TokenKind::Identifier(ident_str.to_string()),
         }
     }
@@ -147,29 +154,35 @@ impl<'a> Iterator for Lexer<'a> {
             Some(':') => TokenKind::Colon,
             Some(';') => TokenKind::Semicolon,
             Some('=') => TokenKind::Assign,
-            
+
             // Handle identifiers/keywords
             Some(c) if c.is_ascii_alphabetic() || c == '_' => {
                 // Must rewind one step because 'advance()' was called in the match
-                self.current_pos -= c.len_utf8(); 
-                self.chars = self.source[self.current_pos..].chars().peekable(); 
+                self.current_pos -= c.len_utf8();
+                self.chars = self.source[self.current_pos..].chars().peekable();
                 self.take_identifier()
             }
-            
+
             // Handle numbers
             Some(c) if c.is_ascii_digit() => {
                 // Rewind one step
-                self.current_pos -= c.len_utf8(); 
-                self.chars = self.source[self.current_pos..].chars().peekable(); 
+                self.current_pos -= c.len_utf8();
+                self.chars = self.source[self.current_pos..].chars().peekable();
                 self.take_number()
             }
-            
+
             // End of file
             None => {
                 // Return Eof token once, then None on subsequent calls
                 if start_pos < self.source.len() {
                     // Should only happen if there was trailing whitespace
-                    return Some(Token { kind: TokenKind::Eof, span: Span { start: start_pos, end: start_pos } });
+                    return Some(Token {
+                        kind: TokenKind::Eof,
+                        span: Span {
+                            start: start_pos,
+                            end: start_pos,
+                        },
+                    });
                 }
                 return None;
             }
@@ -182,7 +195,10 @@ impl<'a> Iterator for Lexer<'a> {
 
         Some(Token {
             kind,
-            span: Span { start: start_pos, end: end_pos },
+            span: Span {
+                start: start_pos,
+                end: end_pos,
+            },
         })
     }
 }

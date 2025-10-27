@@ -1,14 +1,21 @@
-use std::fmt;
-
-// --- Helper Types ---
 #[derive(Debug, PartialEq, Clone)]
 pub enum PrimitiveType {
-    Bool, U8, U16, U32, U64, I8, I16, I32, I64, F32, F64,
+    Bool,
+    U8,
+    U16,
+    U32,
+    U64,
+    I8,
+    I16,
+    I32,
+    I64,
+    F32,
+    F64,
 }
 
 impl PrimitiveType {
     /// Gets the size in bits of a primitive type.
-    pub fn get_bit_width(&self) -> u64 {
+    pub fn get_bit_width(&self) -> usize {
         match self {
             PrimitiveType::Bool | PrimitiveType::U8 | PrimitiveType::I8 => 8,
             PrimitiveType::U16 | PrimitiveType::I16 => 16,
@@ -38,7 +45,7 @@ pub enum Type {
 pub struct Field {
     pub name: String,
     pub type_info: Type,
-    pub bit_field_size: Option<u64>, // e.g., '4' in u8:4
+    pub bit_field_size: Option<usize>, // e.g., '4' in u8:4
 }
 
 // --- Enum Definition ---
@@ -79,16 +86,17 @@ pub enum Definition {
     Enum(EnumDef),
 }
 
+impl Definition {
+    pub fn name(&self) -> &str {
+        match self {
+            Definition::Message(m) => &m.name,
+            Definition::Struct(s) => &s.name,
+            Definition::Enum(e) => &e.name,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct OnyxModule {
     pub definitions: Vec<Definition>,
-}
-
-// A simple error type for parsing failures
-#[derive(Debug)]
-pub struct ParseError(pub String);
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Parse Error: {}", self.0)
-    }
 }
