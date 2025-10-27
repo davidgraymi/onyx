@@ -61,12 +61,8 @@ impl CppGenerator {
             self.file_stem.to_ascii_uppercase()
         )
         .unwrap();
-        writeln!(
-            self.header_output,
-            "#include <cstdint> // For fixed-size integers (uint8_t, etc.)"
-        )
-        .unwrap();
-        writeln!(self.header_output, "#include <cstring> // For size_t\n").unwrap();
+        writeln!(self.header_output, "#include <stdint.h>").unwrap();
+        writeln!(self.header_output, "#include <string.h>\n").unwrap();
         writeln!(self.header_output, "#pragma pack(push, 1)\n").unwrap();
     }
 
@@ -87,7 +83,7 @@ impl CppGenerator {
         )
         .unwrap();
         writeln!(self.source_output, "#include \"{}.hpp\"\n", self.file_stem).unwrap();
-        writeln!(self.source_output, "#include <cstring> // For memcpy\n").unwrap();
+        writeln!(self.source_output, "#include <string.h>\n").unwrap();
     }
 
     fn write_enum(&mut self, e: &EnumDef) -> Result<(), CompileError> {
@@ -344,14 +340,21 @@ impl CppGenerator {
 
         // --- 3. Byte Swap Functions (Explicit Overloads) ---
         let swap_types = vec![
-            ("uint16_t", "2", false),
-            ("int16_t", "2", false),
-            ("uint32_t", "4", false),
-            ("int32_t", "4", false),
-            ("float", "4", true),
-            ("uint64_t", "8", false),
-            ("int64_t", "8", false),
-            ("double", "8", true),
+            (
+                "uint16_t",
+                "int16_t",
+                "((value << 8) & 0xFF00) | ((value >> 8) & 0x00FF)",
+            ),
+            (
+                "uint32_t",
+                "int32_t",
+                "(value << 24) | ((value & 0x00FF0000) >> 8) | ((value & 0x0000FF00) << 8) | (value >> 24)",
+            ),
+            (
+                "uint64_t",
+                "int64_t",
+                "(value << 56) | ((value & 0x00FF000000000000ULL) >> 40) | ((value & 0x0000FF0000000000ULL) >> 24) | ((value & 0x000000FF00000000ULL) >> 8) | ((value & 0x00000000FF000000ULL) << 8) | ((value & 0x0000000000FF0000ULL) << 24) | ((value & 0x000000000000FF00ULL) << 40) | (value >> 56)",
+            ),
         ];
 
         writeln!(
@@ -360,54 +363,41 @@ impl CppGenerator {
         )
         .unwrap();
 
-        for (cpp_type, size, is_float) in &swap_types {
-            if *is_float {
-                // Special handling for floating point types
-                let integer_type = if *size == "4" { "uint32_t" } else { "uint64_t" };
-                writeln!(
-                    self.header_output,
-                    "inline {cpp_type} byteswap({cpp_type} value) {{"
-                )
-                .unwrap();
-                writeln!(self.header_output, "  {integer_type} temp;").unwrap();
-                writeln!(
-                    self.header_output,
-                    "  memcpy(&temp, &value, sizeof(value));"
-                )
-                .unwrap();
-                writeln!(
-                    self.header_output,
-                    "  uint8_t* p = reinterpret_cast<uint8_t*>(&temp);"
-                )
-                .unwrap();
-                writeln!(self.header_output, "  reverse(p, p + sizeof(temp));").unwrap();
-                writeln!(
-                    self.header_output,
-                    "  memcpy(&value, &temp, sizeof(value));"
-                )
-                .unwrap();
-                writeln!(self.header_output, "  return value;").unwrap();
-                writeln!(self.header_output, "}}\n").unwrap();
-            } else {
-                // Handling for integer types
-                writeln!(
-                    self.header_output,
-                    "inline {cpp_type} byteswap({cpp_type} value) {{"
-                )
-                .unwrap();
-                writeln!(
-                    self.header_output,
-                    "  uint8_t* p = reinterpret_cast<std::uint8_t*>(&value);"
-                )
-                .unwrap();
-                writeln!(self.header_output, "  reverse(p, p + sizeof(value));").unwrap();
-                writeln!(self.header_output, "  return value;").unwrap();
-                writeln!(self.header_output, "}}\n").unwrap();
-            }
+        for (u_type, i_type, logic) in &swap_types {
+            // Unsigned Integers
+            writeln!(
+                self.header_output,
+                "inline {u_type} byteswap({u_type} value) {{ return {logic}; }}\n",
+                u_type = u_type,
+                logic = logic
+            )
+            .unwrap();
+
+            // Signed Integers
+            let i_logic = format!("({i_type})byteswap(({u_type})value)", i_type = i_type);
+            writeln!(
+                self.header_output,
+                "inline {i_type} byteswap({i_type} value) {{ return {logic}; }}\n",
+                i_type = i_type,
+                logic = i_logic
+            )
+            .unwrap();
+        }
+
+        let float_types = vec![("float", "uint32_t"), ("double", "uint64_t")];
+
+        for (f_type, i_type) in float_types {
+            writeln!(self.header_output, "inline {f_type} byteswap({f_type} value) {{", f_type = f_type).unwrap();
+            writeln!(self.header_output, "  {i_type} temp;").unwrap();
+            writeln!(self.header_output, "  memcpy(&temp, &value, sizeof(value));").unwrap();
+            writeln!(self.header_output, "  temp = byteswap(temp);").unwrap();
+            writeln!(self.header_output, "  memcpy(&value, &temp, sizeof(value));").unwrap();
+            writeln!(self.header_output, "  return value;").unwrap();
+            writeln!(self.header_output, "}}\n").unwrap();
         }
 
         // --- 4. Conditional Byte Swap Utility (Explicit Overloads) ---
-        writeln!(self.header_output, "\n// Swaps bytes if the host order does not match the network order (Explicit Overloads)").unwrap();
+        writeln!(self.header_output, "// Swaps bytes if the host order does not match the network order (Explicit Overloads)").unwrap();
 
         // Generate byteswap_if_needed for all multi-byte types
         for (cpp_type, _, _) in swap_types {
@@ -427,7 +417,7 @@ impl CppGenerator {
             writeln!(self.header_output, "}}\n").unwrap();
         }
 
-        writeln!(self.header_output, "}} // namespace utils\n").unwrap();
+        writeln!(self.header_output, "}} // namespace utils").unwrap();
     }
 }
 
@@ -443,13 +433,13 @@ impl CodeGenerator for CppGenerator {
         let namespace = "onyx";
 
         self.write_header_includes();
+        self.write_source_includes();
 
         writeln!(self.header_output, "namespace {namespace} {{").unwrap();
         writeln!(self.source_output, "namespace {namespace} {{\n").unwrap();
 
         self.write_endianness_utilities();
-
-        self.write_source_includes();
+        writeln!(self.header_output).unwrap();
 
         for def in &module.definitions {
             match def {
