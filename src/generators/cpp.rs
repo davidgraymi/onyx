@@ -216,7 +216,7 @@ impl CppGenerator {
         .unwrap();
         writeln!(
             self.header_output,
-            "  static {} Deserialize(const Buffer& buffer);",
+            "  static {} Deserialize(Buffer& buffer);",
             m.name
         )
         .unwrap();
@@ -231,7 +231,7 @@ impl CppGenerator {
         // Implementation of the Deserialize method
         writeln!(
             self.source_output,
-            "{class_name} {class_name}::Deserialize(const Buffer& buffer, size_t size) {{"
+            "{class_name} {class_name}::Deserialize(Buffer& buffer, size_t size) {{"
         )
         .unwrap();
         writeln!(
