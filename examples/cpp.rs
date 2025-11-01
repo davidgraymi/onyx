@@ -3,14 +3,14 @@ use onyx::{
     parser::Parser,
 };
 
-use onyx::resolver::resolve_module;
-
 // This part would be in your main execution logic:
 pub fn main() {
     // Assume the Lexer and Parser setup from the previous step is here.
     // Re-use the example source code:
 
     let source = "
+    endian = little
+
     enum Status : u8 {
         Active = 1,
         Inactive,
@@ -33,11 +33,7 @@ pub fn main() {
 ";
 
     // 1. Parse the source code
-    let module_ast = Parser::new(source)
-        .and_then(|p| p.parse_module())
-        .expect("Parsing failed, cannot generate code.");
-
-    let size_table = match resolve_module(&module_ast) {
+    let module_ast = match Parser::new(source).and_then(|p| p.parse_module()) {
         Ok(table) => table,
         Err(e) => {
             eprintln!("Parsing Failed: {e}");
@@ -48,7 +44,7 @@ pub fn main() {
     let mut cpp_generator = CppGenerator::new();
     cpp_generator.file_stem = "my_file".to_string();
 
-    match cpp_generator.generate(&module_ast, &size_table) {
+    match cpp_generator.generate(&module_ast) {
         Ok(files) => {
             for (filename, content) in files {
                 println!("\n=============================================");

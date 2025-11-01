@@ -1,9 +1,9 @@
-use std::fmt;
+use std::{collections::HashMap, fmt};
 
 use crate::{
     ast::{
         Definition, EnumDef, EnumVariant, Field, MessageDef, OnyxModule, PrimitiveType, StructDef,
-        Type,
+        Type, WireEndianness,
     },
     lexer::{Lexer, Token, TokenKind},
 };
@@ -11,6 +11,7 @@ use crate::{
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
     current_token: Token,
+    module: OnyxModule,
 }
 
 impl<'a> Parser<'a> {
@@ -25,6 +26,10 @@ impl<'a> Parser<'a> {
         Ok(Parser {
             lexer,
             current_token,
+            module: OnyxModule {
+                definitions: HashMap::new(),
+                endianness: WireEndianness::Little,
+            },
         })
     }
 
@@ -55,15 +60,62 @@ impl<'a> Parser<'a> {
 
     /// Parses the entire Onyx module.
     pub fn parse_module(mut self) -> Result<OnyxModule, ParseError> {
-        let mut definitions = Vec::new();
+        let mut endianness_set = false;
 
         while self.current_token.kind != TokenKind::Eof {
             // A top-level definition must start with a keyword
+            // Check for endian keyword
+            if self.current_token.kind == TokenKind::Endianness && !endianness_set {
+                self.module.endianness = self.parse_endianness_directive()?;
+                endianness_set = true;
+            } else if self.current_token.kind == TokenKind::Endianness && endianness_set {
+                return Err(ParseError(format!(
+                    "Expected one endianness definition, found a second at position {}",
+                    self.current_token.span.start
+                )));
+            }
+
+            // Check for message, struct, or enum keywords
             let def = self.parse_definition()?;
-            definitions.push(def);
+            if !self.module.definitions.contains_key(def.name()) {
+                self.module.definitions.insert(def.name().to_string(), def);
+            } else {
+                return Err(ParseError(format!(
+                    "{} already exists, found second definition at position {}",
+                    def.name(),
+                    self.current_token.span.start
+                )));
+            }
         }
 
-        Ok(OnyxModule { definitions })
+        self.resolve_module()
+    }
+
+    fn parse_endianness_directive(&mut self) -> Result<WireEndianness, ParseError> {
+        self.consume(TokenKind::Endianness)?;
+        self.consume(TokenKind::Assign)?;
+
+        let endianness = match &self.current_token.kind {
+            TokenKind::Identifier(s) => match s.as_str() {
+                "big" => WireEndianness::Big,
+                "little" => WireEndianness::Little,
+                _ => {
+                    return Err(ParseError(format!(
+                        "Expected 'big' or 'little' for endianness, found '{}' at position {}",
+                        s, self.current_token.span.start
+                    )));
+                }
+            },
+            _ => {
+                return Err(ParseError(format!(
+                    "Expected 'big' or 'little' for endianness, found {:?} at position {}",
+                    self.current_token.kind, self.current_token.span.start
+                )));
+            }
+        };
+        self.advance(); // consume Big/Little
+
+        Ok(endianness)
     }
 
     /// Parses a top-level definition: message, struct, or enum.
@@ -201,7 +253,11 @@ impl<'a> Parser<'a> {
         let name = self.consume_identifier()?;
         let fields = self.parse_struct_body()?;
 
-        Ok(Definition::Message(MessageDef { name, fields }))
+        Ok(Definition::Message(MessageDef {
+            name,
+            fields,
+            size: None,
+        }))
     }
 
     fn parse_struct(&mut self) -> Result<Definition, ParseError> {
@@ -209,7 +265,11 @@ impl<'a> Parser<'a> {
         let name = self.consume_identifier()?;
         let fields = self.parse_struct_body()?;
 
-        Ok(Definition::Struct(StructDef { name, fields }))
+        Ok(Definition::Struct(StructDef {
+            name,
+            fields,
+            size: None,
+        }))
     }
 
     // --- Enum Parsing ---
@@ -263,6 +323,113 @@ impl<'a> Parser<'a> {
             underlying_type,
             variants,
         }))
+    }
+
+    // ------ Core resolving logic ------
+
+    fn resolve_module(mut self) -> Result<OnyxModule, ParseError> {
+        let mut type_stack: Vec<String> = Vec::new();
+
+        // Use a standard `for` loop over mutable values instead of iteration helper
+        // to avoid complex lifetime issues and allow using 'id' in the error message.
+        // We will store the calculated size in a temporary map.
+        let mut calculated_sizes = HashMap::new();
+
+        // Pass 1: Calculate sizes (iterate IMMUTABLY)
+        for (id, def) in &self.module.definitions {
+            // NOTE: The `resolve_type` must be able to calculate and return the size
+            // without needing to mutate the definition, otherwise we run into the
+            // same borrow issue. It looks like resolve_type is *not* supposed to
+            // mutate, but rather calculate recursively.
+
+            // The original logic required calculating size recursively and *then* // assigning it. Let's separate the calculation from the assignment.
+
+            // 1. Clear type_stack for each top-level definition resolution
+            type_stack.clear();
+
+            // 2. Call the original resolve_type (which now just *calculates*)
+            let size = self.resolve_type_calculate(&mut type_stack, def)?;
+            calculated_sizes.insert(id.clone(), size);
+        }
+
+        // Pass 2: Assign sizes (iterate MUTABLY)
+        for (id, def) in self.module.definitions.iter_mut() {
+            let size = calculated_sizes[id]; // Safe to unwrap since we just calculated them
+            match def {
+                Definition::Message(message_def) => message_def.size = Some(size),
+                Definition::Struct(struct_def) => struct_def.size = Some(size),
+                Definition::Enum(_) => {}
+            }
+        }
+
+        Ok(self.module)
+    }
+
+    fn resolve_type_calculate(
+        &self,
+        type_stack: &mut Vec<String>,
+        def: &Definition,
+    ) -> Result<usize, ParseError> {
+        match def.size() {
+            Some(size) => Ok(size),
+            None => {
+                if type_stack.contains(&def.name().to_string()) {
+                    let cycle = type_stack
+                        .iter()
+                        .cloned()
+                        .chain(std::iter::once(def.name().to_string()))
+                        .collect::<Vec<String>>()
+                        .join(" -> ");
+                    return Err(ParseError(format!(
+                        "Circular dependency detected: '{cycle}'."
+                    )));
+                }
+
+                type_stack.push(def.name().to_string());
+
+                let calculated_size = match def {
+                    Definition::Struct(s) => self.resolve_fields_calculate(type_stack, &s.fields),
+                    Definition::Message(m) => self.resolve_fields_calculate(type_stack, &m.fields),
+                    // Enums are resolved during field resolution, not here
+                    _ => Err(ParseError(format!("Unexpected error!"))),
+                }?;
+
+                type_stack.pop();
+
+                Ok(calculated_size)
+            }
+        }
+    }
+
+    // Also update resolve_fields to call resolve_type_calculate
+    fn resolve_fields_calculate(
+        &self,
+        type_stack: &mut Vec<String>,
+        fields: &Vec<Field>,
+    ) -> Result<usize, ParseError> {
+        let mut total_size = 0;
+        for field in fields {
+            let field_size = match field.bit_field_size {
+                Some(size) => size,
+                None => match &field.type_info {
+                    Type::Primitive(p) => p.get_bit_width(),
+                    Type::Custom(custom_name) => {
+                        if let Some(target_def) = self.module.definitions.get(custom_name) {
+                            // Recursively call type resolution to understand circular dependencies
+                            self.resolve_type_calculate(type_stack, target_def)?
+                        } else {
+                            // You had an incomplete error message here
+                            return Err(ParseError(format!(
+                                "Custom type '{}' not defined.",
+                                custom_name
+                            )));
+                        }
+                    }
+                },
+            };
+            total_size += field_size;
+        }
+        Ok(total_size)
     }
 }
 

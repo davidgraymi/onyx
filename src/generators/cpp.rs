@@ -1,7 +1,9 @@
-use std::{collections::HashMap, fmt::Write};
+use std::fmt::Write;
 
 use crate::{
-    ast::{Definition, EnumDef, MessageDef, OnyxModule, PrimitiveType, StructDef, Type},
+    ast::{
+        Definition, EnumDef, MessageDef, OnyxModule, PrimitiveType, StructDef, Type, WireEndianness,
+    },
     generators::{CodeGenerator, CompileError},
 };
 
@@ -18,6 +20,11 @@ impl Default for CppGenerator {
 }
 
 impl CppGenerator {
+    const BIG_ENDIAN_DEFINE: &str = "ONYX_BIG_ENDIAN";
+    const LITTLE_ENDIAN_DEFINE: &str = "ONYX_LITTLE_ENDIAN";
+    const NETWORK_ENDIAN_DEFINE: &str = "ONYX_NETWORK_ORDER";
+    const HOST_ENDIAN_DEFINE: &str = "ONYX_HOST_ORDER";
+
     pub fn new() -> Self {
         CppGenerator {
             header_output: String::new(),
@@ -40,6 +47,13 @@ impl CppGenerator {
             PrimitiveType::I64 => "int64_t",
             PrimitiveType::F32 => "float",
             PrimitiveType::F64 => "double",
+        }
+    }
+
+    fn map_endianness_to_define(&self, endianness: &WireEndianness) -> &'static str {
+        match endianness {
+            WireEndianness::Big => Self::BIG_ENDIAN_DEFINE,
+            WireEndianness::Little => Self::LITTLE_ENDIAN_DEFINE,
         }
     }
 
@@ -144,12 +158,8 @@ impl CppGenerator {
         Ok(())
     }
 
-    fn write_message_declaration(
-        &mut self,
-        m: &MessageDef,
-        packed_sizes: &HashMap<String, usize>,
-    ) -> Result<(), CompileError> {
-        let msg_size = *packed_sizes.get(&m.name).ok_or_else(|| {
+    fn write_message_declaration(&mut self, m: &MessageDef) -> Result<(), CompileError> {
+        let msg_size = m.size.ok_or_else(|| {
             CompileError(format!(
                 "Internal Error: Size not found for message {}",
                 m.name
@@ -214,15 +224,15 @@ impl CppGenerator {
         Ok(())
     }
 
-    fn write_message_definition(
-        &mut self,
-        m: &MessageDef,
-        namespace: &str,
-    ) -> Result<(), CompileError> {
+    fn write_message_definition(&mut self, m: &MessageDef) -> Result<(), CompileError> {
         let class_name = &m.name;
 
         // Implementation of the Deserialize method
-        writeln!(self.source_output, "{namespace}::{class_name} {namespace}::{class_name}::Deserialize(const Buffer& buffer, size_t size) {{").unwrap();
+        writeln!(
+            self.source_output,
+            "{class_name} {class_name}::Deserialize(const Buffer& buffer, size_t size) {{"
+        )
+        .unwrap();
         writeln!(
             self.source_output,
             "  {class_name}& packed = reinterpret_cast<{class_name}&>(buffer);"
@@ -263,7 +273,7 @@ impl CppGenerator {
     }
 
     /// Writes the C++ utility functions for endianness handling.
-    fn write_endianness_utilities(&mut self) {
+    fn write_endianness_utilities(&mut self, endianness: &WireEndianness) {
         writeln!(self.header_output, "namespace utils {{\n").unwrap();
 
         // 1. Network Endianness Definition (Assumed Big Endian)
@@ -272,12 +282,23 @@ impl CppGenerator {
             "// Define network endianness (usually Big Endian)."
         )
         .unwrap();
-        writeln!(self.header_output, "#define ONYX_BIG_ENDIAN 4321").unwrap();
-        writeln!(self.header_output, "#define ONYX_LITTLE_ENDIAN 1234").unwrap();
-        writeln!(self.header_output, "// Default network order: Big Endian").unwrap();
         writeln!(
             self.header_output,
-            "#define ONYX_NETWORK_ORDER ONYX_BIG_ENDIAN\n"
+            "#define {} 4321",
+            Self::BIG_ENDIAN_DEFINE
+        )
+        .unwrap();
+        writeln!(
+            self.header_output,
+            "#define {} 1234",
+            Self::LITTLE_ENDIAN_DEFINE
+        )
+        .unwrap();
+        writeln!(
+            self.header_output,
+            "#define {} {}\n",
+            Self::NETWORK_ENDIAN_DEFINE,
+            self.map_endianness_to_define(endianness)
         )
         .unwrap();
 
@@ -295,7 +316,9 @@ impl CppGenerator {
         .unwrap();
         writeln!(
             self.header_output,
-            "    #define ONYX_HOST_ORDER ONYX_BIG_ENDIAN"
+            "    #define {} {}",
+            Self::HOST_ENDIAN_DEFINE,
+            Self::BIG_ENDIAN_DEFINE
         )
         .unwrap();
         writeln!(
@@ -305,7 +328,9 @@ impl CppGenerator {
         .unwrap();
         writeln!(
             self.header_output,
-            "    #define ONYX_HOST_ORDER ONYX_LITTLE_ENDIAN"
+            "    #define {} {}",
+            Self::HOST_ENDIAN_DEFINE,
+            Self::LITTLE_ENDIAN_DEFINE
         )
         .unwrap();
         writeln!(self.header_output, "  #else").unwrap();
@@ -327,7 +352,9 @@ impl CppGenerator {
         .unwrap();
         writeln!(
             self.header_output,
-            "  #define ONYX_HOST_ORDER ONYX_LITTLE_ENDIAN"
+            "  #define {} {}",
+            Self::HOST_ENDIAN_DEFINE,
+            Self::LITTLE_ENDIAN_DEFINE
         )
         .unwrap();
         writeln!(self.header_output, "#else").unwrap();
@@ -387,17 +414,34 @@ impl CppGenerator {
         let float_types = vec![("float", "uint32_t"), ("double", "uint64_t")];
 
         for (f_type, i_type) in float_types {
-            writeln!(self.header_output, "inline {f_type} byteswap({f_type} value) {{", f_type = f_type).unwrap();
+            writeln!(
+                self.header_output,
+                "inline {f_type} byteswap({f_type} value) {{",
+                f_type = f_type
+            )
+            .unwrap();
             writeln!(self.header_output, "  {i_type} temp;").unwrap();
-            writeln!(self.header_output, "  memcpy(&temp, &value, sizeof(value));").unwrap();
+            writeln!(
+                self.header_output,
+                "  memcpy(&temp, &value, sizeof(value));"
+            )
+            .unwrap();
             writeln!(self.header_output, "  temp = byteswap(temp);").unwrap();
-            writeln!(self.header_output, "  memcpy(&value, &temp, sizeof(value));").unwrap();
+            writeln!(
+                self.header_output,
+                "  memcpy(&value, &temp, sizeof(value));"
+            )
+            .unwrap();
             writeln!(self.header_output, "  return value;").unwrap();
             writeln!(self.header_output, "}}\n").unwrap();
         }
 
         // --- 4. Conditional Byte Swap Utility (Explicit Overloads) ---
-        writeln!(self.header_output, "// Swaps bytes if the host order does not match the network order (Explicit Overloads)").unwrap();
+        writeln!(
+            self.header_output,
+            "// Swaps bytes if the host order does not match the network order (Explicit Overloads)"
+        )
+        .unwrap();
 
         // Generate byteswap_if_needed for all multi-byte types
         for (cpp_type, _, _) in swap_types {
@@ -408,7 +452,9 @@ impl CppGenerator {
             .unwrap();
             writeln!(
                 self.header_output,
-                "  if (ONX_HOST_ORDER != ONX_NETWORK_ORDER) {{"
+                "  if ({} != {}) {{",
+                Self::HOST_ENDIAN_DEFINE,
+                Self::NETWORK_ENDIAN_DEFINE
             )
             .unwrap();
             writeln!(self.header_output, "    return byteswap(value);").unwrap();
@@ -422,11 +468,7 @@ impl CppGenerator {
 }
 
 impl CodeGenerator for CppGenerator {
-    fn generate(
-        &mut self,
-        module: &OnyxModule,
-        packed_sizes: &HashMap<String, usize>,
-    ) -> Result<Vec<(String, String)>, CompileError> {
+    fn generate(&mut self, module: &OnyxModule) -> Result<Vec<(String, String)>, CompileError> {
         self.header_output.clear();
         self.source_output.clear();
 
@@ -438,10 +480,10 @@ impl CodeGenerator for CppGenerator {
         writeln!(self.header_output, "namespace {namespace} {{").unwrap();
         writeln!(self.source_output, "namespace {namespace} {{\n").unwrap();
 
-        self.write_endianness_utilities();
+        self.write_endianness_utilities(&module.endianness);
         writeln!(self.header_output).unwrap();
 
-        for def in &module.definitions {
+        for (_, def) in &module.definitions {
             match def {
                 Definition::Enum(e) => {
                     // Enums go entirely in the header
@@ -455,9 +497,9 @@ impl CodeGenerator for CppGenerator {
                 }
                 Definition::Message(m) => {
                     // Messages require both header (declaration) and source (definition)
-                    self.write_message_declaration(m, packed_sizes)?;
+                    self.write_message_declaration(m)?;
                     writeln!(self.header_output).unwrap();
-                    self.write_message_definition(m, namespace)?;
+                    self.write_message_definition(m)?;
                 }
             }
         }

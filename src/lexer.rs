@@ -13,6 +13,8 @@ pub struct Span {
 #[derive(Debug, PartialEq)]
 pub enum TokenKind {
     // Keywords
+    Endianness,
+    Import,
     Message,
     Struct,
     Enum,
@@ -25,11 +27,14 @@ pub enum TokenKind {
     Colon,      // :
     Semicolon,  // ;
     Assign,     // =
-    // Literals and Identifiers
-    Identifier(String), // my_field, MyStructName
-    LiteralInt(u64),    // 123
-    // End of File and Error
+    /// Custom type identifier that assigns an id to something like a message or struct.
+    /// my_field MyStructName
+    Identifier(String),
+    /// Integer literal (i.e. 123)
+    LiteralInt(u64),
+    /// End of File
     Eof,
+    /// Error token with a message
     Error(String),
 }
 
@@ -93,6 +98,8 @@ impl<'a> Lexer<'a> {
 
         // Check if it's a reserved keyword or type
         match ident_str {
+            "import" => TokenKind::Import,
+            "endian" => TokenKind::Endianness,
             "message" => TokenKind::Message,
             "struct" => TokenKind::Struct,
             "enum" => TokenKind::Enum,

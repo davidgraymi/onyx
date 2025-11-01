@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum PrimitiveType {
     Bool,
@@ -45,7 +47,7 @@ pub enum Type {
 pub struct Field {
     pub name: String,
     pub type_info: Type,
-    pub bit_field_size: Option<usize>, // e.g., '4' in u8:4
+    pub bit_field_size: Option<usize>,
 }
 
 // --- Enum Definition ---
@@ -53,13 +55,14 @@ pub struct Field {
 #[derive(Debug, PartialEq, Clone)]
 pub struct EnumVariant {
     pub name: String,
-    pub value: Option<u64>, // The optional assigned constant value
+    /// The optional assigned constant value
+    pub value: Option<u64>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct EnumDef {
     pub name: String,
-    pub underlying_type: PrimitiveType, // e.g., u32, u8, etc.
+    pub underlying_type: PrimitiveType,
     pub variants: Vec<EnumVariant>,
 }
 
@@ -69,12 +72,14 @@ pub struct EnumDef {
 pub struct StructDef {
     pub name: String,
     pub fields: Vec<Field>,
+    pub size: Option<usize>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct MessageDef {
     pub name: String,
     pub fields: Vec<Field>,
+    pub size: Option<usize>,
 }
 
 // --- Top-Level Definitions and Module ---
@@ -94,9 +99,24 @@ impl Definition {
             Definition::Enum(e) => &e.name,
         }
     }
+
+    pub fn size(&self) -> Option<usize> {
+        match self {
+            Definition::Message(message_def) => message_def.size,
+            Definition::Struct(struct_def) => struct_def.size,
+            Definition::Enum(enum_def) => Some(enum_def.underlying_type.get_bit_width()),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum WireEndianness {
+    Big,
+    Little,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct OnyxModule {
-    pub definitions: Vec<Definition>,
+    pub definitions: HashMap<String, Definition>,
+    pub endianness: WireEndianness,
 }

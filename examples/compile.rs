@@ -1,4 +1,4 @@
-use onyx::{parser::Parser, resolver::resolve_module};
+use onyx::parser::Parser;
 
 // This part would be in your main execution logic:
 pub fn main() {
@@ -36,17 +36,5 @@ pub fn main() {
     for def in &module.definitions {
         println!("{def:#?}");
         println!("---");
-    }
-
-    let size_table = match resolve_module(&module) {
-        Ok(table) => table,
-        Err(e) => {
-            eprintln!("Parsing Failed: {e}");
-            return;
-        }
-    };
-
-    for (type_name, size) in size_table {
-        println!("Type: {type_name}, Packed Size: {size} bits");
     }
 }
