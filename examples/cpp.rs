@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::process::Command;
 use std::{
     fs::{self, File},
@@ -48,8 +49,8 @@ pub fn main() {
         }
     };
 
-    let mut cpp_generator = CppGenerator::new();
-    cpp_generator.file_stem = "examples/data/my_file".to_string();
+    let mut cpp_generator = CppGenerator::default();
+    cpp_generator.file_stem = PathBuf::from("examples/data/my_file");
 
     let files = match cpp_generator.generate(&module_ast) {
         Ok(files) => files,
