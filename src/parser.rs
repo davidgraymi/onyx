@@ -391,7 +391,7 @@ impl<'a> Parser<'a> {
                     Definition::Struct(s) => self.resolve_fields_calculate(type_stack, &s.fields),
                     Definition::Message(m) => self.resolve_fields_calculate(type_stack, &m.fields),
                     // Enums are resolved during field resolution, not here
-                    _ => Err(ParseError(format!("Unexpected error!"))),
+                    _ => Err(ParseError("Unexpected error!".to_string())),
                 }?;
 
                 type_stack.pop();
@@ -420,8 +420,7 @@ impl<'a> Parser<'a> {
                         } else {
                             // You had an incomplete error message here
                             return Err(ParseError(format!(
-                                "Custom type '{}' not defined.",
-                                custom_name
+                                "Custom type '{custom_name}' not defined."
                             )));
                         }
                     }

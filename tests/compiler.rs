@@ -1,7 +1,4 @@
-use onyx::{
-    generators::{CodeGenerator, cpp::CppGenerator},
-    parser::Parser,
-};
+use onyx::parser::Parser;
 
 #[test]
 fn circular_dependency() {

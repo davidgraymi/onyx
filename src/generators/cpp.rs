@@ -394,19 +394,15 @@ impl CppGenerator {
             // Unsigned Integers
             writeln!(
                 self.header_output,
-                "inline {u_type} byteswap({u_type} value) {{ return {logic}; }}\n",
-                u_type = u_type,
-                logic = logic
+                "inline {u_type} byteswap({u_type} value) {{ return {logic}; }}\n"
             )
             .unwrap();
 
             // Signed Integers
-            let i_logic = format!("({i_type})byteswap(({u_type})value)", i_type = i_type);
+            let i_logic = format!("({i_type})byteswap(({u_type})value)");
             writeln!(
                 self.header_output,
-                "inline {i_type} byteswap({i_type} value) {{ return {logic}; }}\n",
-                i_type = i_type,
-                logic = i_logic
+                "inline {i_type} byteswap({i_type} value) {{ return {i_logic}; }}\n"
             )
             .unwrap();
         }
@@ -416,8 +412,7 @@ impl CppGenerator {
         for (f_type, i_type) in float_types {
             writeln!(
                 self.header_output,
-                "inline {f_type} byteswap({f_type} value) {{",
-                f_type = f_type
+                "inline {f_type} byteswap({f_type} value) {{"
             )
             .unwrap();
             writeln!(self.header_output, "  {i_type} temp;").unwrap();
@@ -483,7 +478,7 @@ impl CodeGenerator for CppGenerator {
         self.write_endianness_utilities(&module.endianness);
         writeln!(self.header_output).unwrap();
 
-        for (_, def) in &module.definitions {
+        for def in module.definitions.values() {
             match def {
                 Definition::Enum(e) => {
                     // Enums go entirely in the header
