@@ -14,7 +14,10 @@ fn circular_dependency() {
 
     let parser = match Parser::new(source) {
         Ok(p) => p,
-        Err(e) => {assert!(false, "{e}"); return;},
+        Err(e) => {
+            assert!(false, "{e}");
+            return;
+        }
     };
 
     match parser.parse_module() {
@@ -33,7 +36,10 @@ fn undefined_type() {
 
     let parser = match Parser::new(source) {
         Ok(p) => p,
-        Err(e) => {assert!(false, "{e}"); return;},
+        Err(e) => {
+            assert!(false, "{e}");
+            return;
+        }
     };
 
     match parser.parse_module() {

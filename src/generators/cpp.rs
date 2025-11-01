@@ -159,19 +159,20 @@ impl CppGenerator {
     }
 
     fn write_message_declaration(&mut self, m: &MessageDef) -> Result<(), CompileError> {
-        let msg_size = m.size.ok_or_else(|| {
+        let bit_width = m.size.ok_or_else(|| {
             CompileError(format!(
                 "Internal Error: Size not found for message {}",
                 m.name
             ))
         })?;
+        let byte_width = bit_width.div_ceil(8);
 
         writeln!(self.header_output, "class {} {{", m.name).unwrap();
         writeln!(self.header_output, "public:").unwrap();
-        writeln!(self.header_output, "  const size_t kSizeOf = {msg_size};").unwrap();
+        writeln!(self.header_output, "  const size_t kSizeOf = {byte_width};").unwrap();
         writeln!(
             self.header_output,
-            "  using Buffer = uint8_t[{msg_size}];\n"
+            "  using Buffer = uint8_t[{byte_width}];\n"
         )
         .unwrap();
 
