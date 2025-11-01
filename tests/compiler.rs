@@ -8,16 +8,35 @@ fn circular_dependency() {
     }
 
     message User {
-        id u64,
-        name u8 : 7,
-        yes bool : 1,
-        email u32,
         hdr Header,
     }
     ";
 
-    // 1. Parse the source code
-    match Parser::new(source).and_then(|p| p.parse_module()) {
+    let parser = match Parser::new(source) {
+        Ok(p) => p,
+        Err(e) => {assert!(false, "{e}"); return;},
+    };
+
+    match parser.parse_module() {
+        Ok(_) => assert!(false),
+        Err(_) => assert!(true),
+    }
+}
+
+#[test]
+fn undefined_type() {
+    let source = "
+    message User {
+        hdr Header,
+    }
+    ";
+
+    let parser = match Parser::new(source) {
+        Ok(p) => p,
+        Err(e) => {assert!(false, "{e}"); return;},
+    };
+
+    match parser.parse_module() {
         Ok(_) => assert!(false),
         Err(_) => assert!(true),
     }
