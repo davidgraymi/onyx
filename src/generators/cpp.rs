@@ -199,7 +199,12 @@ impl CppGenerator {
         writeln!(self.header_output, "}};").unwrap();
     }
 
-    fn write_class_definition(&mut self, class_name: &String, fields: &Vec<Field>) {
+    fn write_class_definition(
+        &mut self,
+        module: &OnyxModule,
+        class_name: &String,
+        fields: &Vec<Field>,
+    ) {
         // Implementation of the Deserialize method
         writeln!(
             self.source_output,
@@ -229,13 +234,27 @@ impl CppGenerator {
                             .unwrap()
                     }
                     Type::Custom(s) => {
-                        let x = 0;
-                        writeln!(
-                            self.source_output,
-                            "    {s}::Deserialize(reinterpret_cast<{s}&>(packed.{})),",
-                            field.name
-                        )
-                        .unwrap()
+                        match module.definitions.get(s) {
+                            Some(def) => match def {
+                                Definition::Message(_) => writeln!(
+                                    self.source_output,
+                                    "    {s}::Deserialize(reinterpret_cast<{s}::Buffer&>(packed.{})),",
+                                    field.name
+                                )
+                                .unwrap(),
+                                Definition::Struct(_) => writeln!(
+                                    self.source_output,
+                                    "    {s}::Deserialize(reinterpret_cast<{s}::Buffer&>(packed.{})),",
+                                    field.name
+                                )
+                                .unwrap(),
+                                Definition::Enum(_) => {
+                                    writeln!(self.source_output, "    packed.{},", field.name)
+                                        .unwrap()
+                                }
+                            },
+                            None => todo!(),
+                        };
                     }
                 }
             } else {
@@ -457,9 +476,7 @@ impl CodeGenerator for CppGenerator {
             let def = match module.definitions.get(id) {
                 Some(def) => def,
                 None => {
-                    return Err(CompileError(format!(
-                        "Expected to find type {id} in AST."
-                    )));
+                    return Err(CompileError(format!("Expected to find type {id} in AST.")));
                 }
             };
 
@@ -481,7 +498,7 @@ impl CodeGenerator for CppGenerator {
                     };
                     self.write_class_declaration(&s.name, &s.fields, struct_size);
                     writeln!(self.header_output).unwrap();
-                    self.write_class_definition(&s.name, &s.fields);
+                    self.write_class_definition(module, &s.name, &s.fields);
                 }
                 Definition::Message(m) => {
                     let msg_size = match m.size {
@@ -495,7 +512,7 @@ impl CodeGenerator for CppGenerator {
                     };
                     self.write_class_declaration(&m.name, &m.fields, msg_size);
                     writeln!(self.header_output).unwrap();
-                    self.write_class_definition(&m.name, &m.fields);
+                    self.write_class_definition(module, &m.name, &m.fields);
                 }
             }
         }

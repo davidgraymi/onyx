@@ -61,7 +61,7 @@ pub fn main() {
     };
 
     let mut binding = Command::new("g++");
-    let command = binding.arg("-std=c++11");
+    let command = binding.arg("-c").arg("-std=c++11");
 
     for (file_path, content) in &files {
         let parent_dir = Path::new(&file_path).parent().unwrap();
