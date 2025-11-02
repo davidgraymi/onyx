@@ -50,7 +50,7 @@ pub fn main() {
     };
 
     let mut cpp_generator = CppGenerator::default();
-    cpp_generator.file_stem = PathBuf::from("examples/data/my_file");
+    let _ = cpp_generator.add_file_path(PathBuf::from("examples/data/my_file"));
 
     let files = match cpp_generator.generate(&module_ast) {
         Ok(files) => files,
@@ -86,6 +86,9 @@ pub fn main() {
     if command_status.success() {
         println!("Compilation successful.");
     } else {
-        eprintln!("Compilation failed with status: {:?}", command_status.code());
+        eprintln!(
+            "Compilation failed with status: {:?}",
+            command_status.code()
+        );
     }
 }

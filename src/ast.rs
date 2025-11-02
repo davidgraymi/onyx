@@ -109,14 +109,16 @@ impl Definition {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Default, PartialEq, Clone)]
 pub enum WireEndianness {
-    Big,
+    #[default]
     Little,
+    Big,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Default, PartialEq, Clone)]
 pub struct OnyxModule {
     pub definitions: HashMap<String, Definition>,
     pub endianness: WireEndianness,
+    pub order: Vec<String>,
 }

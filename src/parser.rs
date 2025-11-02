@@ -26,10 +26,7 @@ impl<'a> Parser<'a> {
         Ok(Parser {
             lexer,
             current_token,
-            module: OnyxModule {
-                definitions: HashMap::new(),
-                endianness: WireEndianness::Little,
-            },
+            module: OnyxModule::default(),
         })
     }
 
@@ -328,6 +325,7 @@ impl<'a> Parser<'a> {
     // ------ Core resolving logic ------
 
     fn resolve_module(mut self) -> Result<OnyxModule, ParseError> {
+        let mut type_order: Vec<String> = Vec::new();
         let mut type_stack: Vec<String> = Vec::new();
 
         // Use a standard `for` loop over mutable values instead of iteration helper
@@ -348,7 +346,7 @@ impl<'a> Parser<'a> {
             type_stack.clear();
 
             // 2. Call the original resolve_type (which now just *calculates*)
-            let size = self.resolve_type_calculate(&mut type_stack, def)?;
+            let size = self.resolve_type_calculate(&mut type_order, &mut type_stack, def)?;
             calculated_sizes.insert(id.clone(), size);
         }
 
@@ -362,16 +360,23 @@ impl<'a> Parser<'a> {
             }
         }
 
+        self.module.order = type_order;
         Ok(self.module)
     }
 
     fn resolve_type_calculate(
         &self,
+        type_order: &mut Vec<String>,
         type_stack: &mut Vec<String>,
         def: &Definition,
     ) -> Result<usize, ParseError> {
         match def.size() {
-            Some(size) => Ok(size),
+            Some(size) => {
+                if !type_order.contains(&def.name().to_string()) {
+                    type_order.push(def.name().to_string());
+                }
+                Ok(size)
+            }
             None => {
                 if type_stack.contains(&def.name().to_string()) {
                     let cycle = type_stack
@@ -388,13 +393,27 @@ impl<'a> Parser<'a> {
                 type_stack.push(def.name().to_string());
 
                 let calculated_size = match def {
-                    Definition::Struct(s) => self.resolve_fields_calculate(type_stack, &s.fields),
-                    Definition::Message(m) => self.resolve_fields_calculate(type_stack, &m.fields),
+                    Definition::Struct(s) => {
+                        self.resolve_fields_calculate(type_order, type_stack, &s.fields)
+                    }
+                    Definition::Message(m) => {
+                        self.resolve_fields_calculate(type_order, type_stack, &m.fields)
+                    }
                     // Enums are resolved during field resolution, not here
                     _ => Err(ParseError("Unexpected error!".to_string())),
                 }?;
 
-                type_stack.pop();
+                let deepest_dep = match type_stack.pop() {
+                    Some(id) => id,
+                    None => {
+                        return Err(ParseError(format!(
+                            "Expected a custom type to be on the stack."
+                        )));
+                    }
+                };
+                if !type_order.contains(&deepest_dep) {
+                    type_order.push(deepest_dep);
+                }
 
                 Ok(calculated_size)
             }
@@ -404,6 +423,7 @@ impl<'a> Parser<'a> {
     // Also update resolve_fields to call resolve_type_calculate
     fn resolve_fields_calculate(
         &self,
+        type_order: &mut Vec<String>,
         type_stack: &mut Vec<String>,
         fields: &Vec<Field>,
     ) -> Result<usize, ParseError> {
@@ -416,7 +436,7 @@ impl<'a> Parser<'a> {
                     Type::Custom(custom_name) => {
                         if let Some(target_def) = self.module.definitions.get(custom_name) {
                             // Recursively call type resolution to understand circular dependencies
-                            self.resolve_type_calculate(type_stack, target_def)?
+                            self.resolve_type_calculate(type_order, type_stack, target_def)?
                         } else {
                             // You had an incomplete error message here
                             return Err(ParseError(format!(
