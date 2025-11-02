@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::Command;
 use std::{
@@ -11,37 +12,23 @@ use onyx::{
     parser::Parser,
 };
 
-// This part would be in your main execution logic:
 pub fn main() {
-    // Assume the Lexer and Parser setup from the previous step is here.
-    // Re-use the example source code:
+    let mut file = match File::open("examples/example.onyx") {
+        Ok(file) => file,
+        Err(e) => {
+            eprintln!("{e}");
+            return;
+        }
+    };
 
-    let source = "
-    endian = little
-
-    enum Status : u8 {
-        Active = 1,
-        Inactive,
-        Error = 10,
-    }
-
-    struct Header {
-        version u32 : 4,
-        checksum u16,
-        tag Status,
-    }
-
-    message User {
-        id u64,
-        name u8 : 7,
-        yes bool : 1,
-        email u32,
-        hdr Header,
-    }
-";
+    let mut source = String::new();
+    let _ = file.read_to_string(&mut source).inspect_err(|e| {
+        eprintln!("{e}");
+        return;
+    });
 
     // 1. Parse the source code
-    let module_ast = match Parser::new(source).and_then(|p| p.parse_module()) {
+    let module_ast = match Parser::new(&source).and_then(|p| p.parse_module()) {
         Ok(table) => table,
         Err(e) => {
             eprintln!("Parsing Failed: {e}");
@@ -50,7 +37,7 @@ pub fn main() {
     };
 
     let mut cpp_generator = CppGenerator::default();
-    let _ = cpp_generator.add_file_path(PathBuf::from("examples/data/my_file"));
+    let _ = cpp_generator.add_file_path(PathBuf::from("examples/data/example"));
 
     let files = match cpp_generator.generate(&module_ast) {
         Ok(files) => files,
@@ -61,7 +48,8 @@ pub fn main() {
     };
 
     let mut binding = Command::new("g++");
-    let command = binding.arg("-c").arg("-std=c++11");
+    let command = binding.arg("-std=c++11");
+    command.arg("examples/use.cpp");
 
     for (file_path, content) in &files {
         let parent_dir = Path::new(&file_path).parent().unwrap();

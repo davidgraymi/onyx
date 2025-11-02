@@ -488,7 +488,7 @@ impl CodeGenerator for CppGenerator {
                 }
                 Definition::Struct(s) => {
                     let struct_size = match s.size {
-                        Some(struct_size) => struct_size,
+                        Some(struct_size) => struct_size.div_ceil(8),
                         None => {
                             return Err(CompileError(format!(
                                 "Expected {} to have size, found none",
@@ -502,7 +502,7 @@ impl CodeGenerator for CppGenerator {
                 }
                 Definition::Message(m) => {
                     let msg_size = match m.size {
-                        Some(msg_size) => msg_size,
+                        Some(msg_size) => msg_size.div_ceil(8),
                         None => {
                             return Err(CompileError(format!(
                                 "Expected {} to have size, found none",
