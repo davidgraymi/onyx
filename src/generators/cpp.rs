@@ -4,10 +4,7 @@ use std::{
 };
 
 use crate::{
-    ast::{
-        Definition, EnumDef, Field, MessageDef, OnyxModule, PrimitiveType, StructDef, Type,
-        WireEndianness,
-    },
+    ast::{Definition, EnumDef, Field, OnyxModule, PrimitiveType, Type, WireEndianness},
     generators::{CodeGenerator, CompileError},
 };
 
@@ -29,7 +26,7 @@ impl CppGenerator {
         self.file_path = file_path;
         self.file_stem = match self.file_path.file_stem() {
             Some(s) => s.to_string_lossy().to_string(),
-            None => return Err(CompileError(format!(""))),
+            None => return Err(CompileError(String::new())),
         };
         Ok(())
     }
@@ -151,7 +148,7 @@ impl CppGenerator {
         // Declare members (fields)
         for field in fields {
             let type_str = match &field.type_info {
-                Type::Primitive(p) => self.map_primitive_type_to_cpp(&p).to_string(),
+                Type::Primitive(p) => self.map_primitive_type_to_cpp(p).to_string(),
                 Type::Custom(s) => s.clone(),
             };
 
@@ -461,8 +458,7 @@ impl CodeGenerator for CppGenerator {
                 Some(def) => def,
                 None => {
                     return Err(CompileError(format!(
-                        "Expected to find type {} in AST.",
-                        id
+                        "Expected to find type {id} in AST."
                     )));
                 }
             };
