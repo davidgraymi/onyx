@@ -1,4 +1,14 @@
-use onyx::parser::Parser;
+use std::{
+    fs::{self, File},
+    io::{Read, Write},
+    path::{Path, PathBuf},
+    process::Command,
+};
+
+use onyx::{
+    generators::{CodeGenerator, cpp::CppGenerator},
+    parser::Parser,
+};
 
 #[test]
 fn circular_dependency() {
@@ -45,5 +55,83 @@ fn undefined_type() {
     match parser.parse_module() {
         Ok(_) => assert!(false),
         Err(_) => assert!(true),
+    }
+}
+
+#[test]
+fn compile_cpp() {
+    let mut file = match File::open("tests/example.onyx") {
+        Ok(file) => file,
+        Err(e) => {
+            assert!(false, "{e}");
+            return;
+        }
+    };
+
+    let mut source = String::new();
+    let _ = file.read_to_string(&mut source).inspect_err(|e| {
+        assert!(false, "{e}");
+    });
+
+    // 1. Parse the source code
+    let module_ast = match Parser::new(&source).and_then(|p| p.parse_module()) {
+        Ok(table) => table,
+        Err(e) => {
+            assert!(false, "Parsing Failed: {e}");
+            return;
+        }
+    };
+
+    let mut cpp_generator = CppGenerator::default();
+    let _ = cpp_generator.add_file_path(PathBuf::from("tests/data/example"));
+
+    let files = match cpp_generator.generate(&module_ast) {
+        Ok(files) => files,
+        Err(e) => {
+            assert!(false, "Code Generation Failed: {e}");
+            return;
+        }
+    };
+
+    let mut binding = Command::new("g++");
+    let command: &mut Command = binding.arg("-std=c++11");
+    command.arg("tests/use.cpp");
+
+    for (file_path, content) in &files {
+        let parent_dir = Path::new(&file_path).parent().unwrap();
+        fs::create_dir_all(parent_dir).unwrap();
+        let mut f = match File::create(file_path) {
+            Ok(f) => f,
+            Err(e) => {
+                assert!(false, "{e}");
+                return;
+            }
+        };
+        let _ = f.write_all(content.as_bytes());
+        command.arg(file_path);
+    }
+
+    let command_status = command
+        .spawn()
+        .expect("Failed to execute 'g++' command")
+        .wait()
+        .expect("Failed to wait for 'g++' command");
+
+    if command_status.success() {
+        println!("Compilation successful.");
+    } else {
+        assert!(false, "Compilation failed with status: {:?}", command_status.code());
+    }
+
+    let command_status = Command::new("./a.out")
+        .spawn()
+        .expect("Failed to execute 'g++' command")
+        .wait()
+        .expect("Failed to wait for 'g++' command");
+
+    if command_status.success() {
+        println!("Program run successful.");
+    } else {
+        assert!(false, "Program failed with status: {:?}", command_status.code());
     }
 }

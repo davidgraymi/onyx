@@ -70,20 +70,6 @@ impl CppGenerator {
         }
     }
 
-    fn get_primitive_byte_size(&self, type_info: &Type, module: &OnyxModule) -> usize {
-        match type_info {
-            Type::Primitive(p) => p.get_byte_size(),
-            Type::Custom(s) => {
-                let definition = module.definitions.get(s).unwrap();
-                match definition {
-                    Definition::Enum(e) => e.underlying_type.get_byte_size(),
-                    Definition::Struct(struct_def) => struct_def.size.unwrap(),
-                    Definition::Message(message_def) => message_def.size.unwrap(),
-                }
-            }
-        }
-    }
-
     fn get_field_groups<'a>(&self, fields: &'a Vec<Field>) -> Vec<Vec<&'a Field>> {
         let mut field_groups: Vec<Vec<&Field>> = Vec::new();
         let mut current_group: Vec<&Field> = Vec::new();
@@ -262,15 +248,6 @@ impl CppGenerator {
                         String::new()
                     };
 
-                    writeln!(
-                        self.header_output,
-                        "  /// Portable accessor for field {field_name} ({bits} bits, shift {bits_to_shift})",
-                        field_name = field.name,
-                        bits = bits,
-                        bits_to_shift = bits_to_shift
-                    )
-                    .unwrap();
-
                     // Accessor logic: 1. Cast byte array to integer. 2. Shift/Mask.
                     writeln!(
                         self.header_output,
@@ -295,12 +272,6 @@ impl CppGenerator {
                 // 2. Generate Public Accessors for Non-Bit-Field
                 let field = group[0];
                 let type_str = self.get_primitive_cpp_type(&field.type_info);
-                writeln!(
-                    self.header_output,
-                    "  /// Simple accessor for field {name}",
-                    name = field.name
-                )
-                .unwrap();
                 writeln!(
                     self.header_output,
                     "  inline {type_str} {name}() const {{ return __raw_{name}; }}\n",

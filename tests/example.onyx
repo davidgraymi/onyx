@@ -1,0 +1,21 @@
+endian = big
+
+enum Status : u8 {
+    Active = 1,
+    Inactive,
+    Error = 10,
+}
+
+struct Header {
+    version u32 : 4,
+    checksum u16,
+    tag Status,
+}
+
+message User {
+    id u64,
+    name u8 : 7,
+    yes bool : 1,
+    email u32,
+    hdr Header,
+}
