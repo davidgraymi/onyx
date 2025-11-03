@@ -3,6 +3,7 @@ use std::{error::Error, fmt, path::PathBuf};
 use crate::ast::OnyxModule;
 
 pub mod cpp;
+pub mod py;
 
 pub trait CodeGenerator {
     /// Translates the AST module into a final, runnable code string.
