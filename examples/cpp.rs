@@ -24,7 +24,6 @@ pub fn main() {
     let mut source = String::new();
     let _ = file.read_to_string(&mut source).inspect_err(|e| {
         eprintln!("{e}");
-        return;
     });
 
     // 1. Parse the source code
@@ -78,5 +77,17 @@ pub fn main() {
             "Compilation failed with status: {:?}",
             command_status.code()
         );
+    }
+
+    let command_status = Command::new("./a.out")
+        .spawn()
+        .expect("Failed to execute 'g++' command")
+        .wait()
+        .expect("Failed to wait for 'g++' command");
+
+    if command_status.success() {
+        println!("Program run successful.");
+    } else {
+        eprintln!("Program failed with status: {:?}", command_status.code());
     }
 }

@@ -50,6 +50,18 @@ pub struct Field {
     pub bit_field_size: Option<usize>,
 }
 
+impl Field {
+    pub fn get_bit_width(&self, module: &OnyxModule) -> usize {
+        match self.bit_field_size {
+            Some(x) => x,
+            None => match &self.type_info {
+                Type::Primitive(primitive_type) => primitive_type.get_bit_width(),
+                Type::Custom(s) => module.definitions.get(s).unwrap().size().unwrap() * 8,
+            },
+        }
+    }
+}
+
 // --- Enum Definition ---
 
 #[derive(Debug, PartialEq, Clone)]

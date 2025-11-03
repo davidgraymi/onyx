@@ -1,4 +1,4 @@
-endian = little
+endian = big
 
 enum Status : u8 {
     Active = 1,

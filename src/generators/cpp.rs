@@ -63,6 +63,49 @@ impl CppGenerator {
         }
     }
 
+    fn get_primitive_cpp_type(&self, type_info: &Type) -> String {
+        match type_info {
+            Type::Primitive(p) => self.map_primitive_type_to_cpp(p).to_string(),
+            Type::Custom(s) => s.clone(),
+        }
+    }
+
+    fn get_primitive_byte_size(&self, type_info: &Type, module: &OnyxModule) -> usize {
+        match type_info {
+            Type::Primitive(p) => p.get_byte_size(),
+            Type::Custom(s) => {
+                let definition = module.definitions.get(s).unwrap();
+                match definition {
+                    Definition::Enum(e) => e.underlying_type.get_byte_size(),
+                    Definition::Struct(struct_def) => struct_def.size.unwrap(),
+                    Definition::Message(message_def) => message_def.size.unwrap(),
+                }
+            }
+        }
+    }
+
+    fn get_field_groups<'a>(&self, fields: &'a Vec<Field>) -> Vec<Vec<&'a Field>> {
+        let mut field_groups: Vec<Vec<&Field>> = Vec::new();
+        let mut current_group: Vec<&Field> = Vec::new();
+
+        for field in fields {
+            if field.bit_field_size.is_some() {
+                // Group consecutive bit-fields
+                current_group.push(field);
+            } else {
+                // Non-bit-field encountered. Process the current group, then the standalone field.
+                if !current_group.is_empty() {
+                    field_groups.push(std::mem::take(&mut current_group));
+                }
+                field_groups.push(vec![field]); // Non-bit-field is a group of size 1
+            }
+        }
+        if !current_group.is_empty() {
+            field_groups.push(current_group);
+        }
+        field_groups
+    }
+
     fn write_header_includes(&mut self) {
         writeln!(
             self.header_output,
@@ -135,9 +178,43 @@ impl CppGenerator {
         Ok(())
     }
 
-    fn write_class_declaration(&mut self, class_name: &String, fields: &Vec<Field>, size: usize) {
+    fn write_class_declaration(
+        &mut self,
+        class_name: &String,
+        field_groups: &Vec<Vec<&Field>>,
+        module: &OnyxModule,
+        size: usize,
+    ) {
         writeln!(self.header_output, "class {class_name} {{").unwrap();
-        writeln!(self.header_output, "public:").unwrap();
+        writeln!(self.header_output, "private:").unwrap();
+
+        // Declare members (fields)
+        for group in field_groups {
+            let first_field = group[0];
+            let mut bits = 0;
+            for field in group {
+                bits += field.get_bit_width(module);
+            }
+            let bytes = bits.div_ceil(8);
+
+            if group.len() > 1 || first_field.bit_field_size.is_some() {
+                // This is a bit-field group, replace with a raw container field (byte array)
+                let container_name = format!("__raw_{}", first_field.name);
+                writeln!(self.header_output, "  uint8_t {container_name}[{bytes}];").unwrap();
+            } else {
+                // Non-bit-field, or a single primitive/custom type (use raw prefix for consistency)
+                let type_str = self.get_primitive_cpp_type(&first_field.type_info);
+                writeln!(
+                    self.header_output,
+                    "  {type_str} __raw_{name};",
+                    name = first_field.name,
+                )
+                .unwrap();
+            }
+        }
+
+        // Public accessors
+        writeln!(self.header_output, "\npublic:").unwrap();
         writeln!(
             self.header_output,
             "  static const size_t kSizeOf = {size};"
@@ -145,34 +222,89 @@ impl CppGenerator {
         .unwrap();
         writeln!(self.header_output, "  using Buffer = uint8_t[kSizeOf];\n").unwrap();
 
-        // Declare members (fields)
-        for field in fields {
-            let type_str = match &field.type_info {
-                Type::Primitive(p) => self.map_primitive_type_to_cpp(p).to_string(),
-                Type::Custom(s) => s.clone(),
-            };
+        // Generate Public Accessors for Bit-Field Groups
+        for group in field_groups {
+            let first_field = group[0];
+            if group.len() > 1 || first_field.bit_field_size.is_some() {
+                // It's a bit-field group, generate portable accessors
+                let container_name = format!("__raw_{}", first_field.name);
 
-            if let Some(bits) = field.bit_field_size {
-                if bits > 0 {
+                let container_bytes = &first_field.get_bit_width(module).div_ceil(8);
+                let container_type = match container_bytes {
+                    1 => "uint8_t",
+                    2 => "uint16_t",
+                    4 => "uint32_t",
+                    8 => "uint64_t",
+                    _ => panic!(),
+                };
+
+                for field in group {
+                    let field_type_str = self.get_primitive_cpp_type(&field.type_info);
+                    let bits = field.bit_field_size.unwrap_or(0);
+                    let mask = (1u64 << bits).saturating_sub(1);
+
+                    // Determine bits to shift based on subsequent fields (LSB-to-MSB extraction order)
+                    let mut bits_to_shift: usize = 0;
+                    let mut found_current = false;
+                    for subsequent_field in group {
+                        if subsequent_field.name == field.name {
+                            found_current = true;
+                            continue;
+                        }
+                        if found_current {
+                            bits_to_shift += subsequent_field.bit_field_size.unwrap_or(0);
+                        }
+                    }
+
+                    let cast = if field_type_str != container_type {
+                        format!("({field_type_str})")
+                    } else {
+                        String::new()
+                    };
+
                     writeln!(
                         self.header_output,
-                        "  {type_str} {name} : {bits};",
-                        name = field.name,
+                        "  /// Portable accessor for field {field_name} ({bits} bits, shift {bits_to_shift})",
+                        field_name = field.name,
+                        bits = bits,
+                        bits_to_shift = bits_to_shift
                     )
                     .unwrap();
-                } else {
+
+                    // Accessor logic: 1. Cast byte array to integer. 2. Shift/Mask.
                     writeln!(
                         self.header_output,
-                        "  {type_str} {name};",
-                        name = field.name,
+                        "  inline {field_type_str} {field_name}() const {{",
+                        field_name = field.name,
                     )
                     .unwrap();
+                    writeln!(
+                        self.header_output,
+                        "    const {container_type} raw_value = *reinterpret_cast<const {container_type}*>({container_name});"
+                    ).unwrap();
+                    writeln!(
+                        self.header_output,
+                        "    return {cast}((raw_value >> {shift}) & 0x{mask_hex});",
+                        shift = bits_to_shift,
+                        mask_hex = format!("{:X}", mask)
+                    )
+                    .unwrap();
+                    writeln!(self.header_output, "  }}\n").unwrap();
                 }
             } else {
+                // 2. Generate Public Accessors for Non-Bit-Field
+                let field = group[0];
+                let type_str = self.get_primitive_cpp_type(&field.type_info);
                 writeln!(
                     self.header_output,
-                    "  {type_str} {name};",
-                    name = field.name,
+                    "  /// Simple accessor for field {name}",
+                    name = field.name
+                )
+                .unwrap();
+                writeln!(
+                    self.header_output,
+                    "  inline {type_str} {name}() const {{ return __raw_{name}; }}\n",
+                    name = field.name
                 )
                 .unwrap();
             }
@@ -182,17 +314,22 @@ impl CppGenerator {
         writeln!(self.header_output).unwrap();
         writeln!(
             self.header_output,
-            "  /// Attempts to deserialize {class_name} from a raw buffer."
+            "  /// Attempts to deserialize {class_name} in-place by casting the buffer pointer."
         )
         .unwrap();
         writeln!(
             self.header_output,
-            "  /// Assumes a packed memory layout (no alignment padding)."
+            "  /// NOTE: This mutates the input buffer to correct endianness."
         )
         .unwrap();
         writeln!(
             self.header_output,
-            "  static {class_name} Deserialize(Buffer& buffer);"
+            "  /// Returns a pointer to the object within the buffer."
+        )
+        .unwrap();
+        writeln!(
+            self.header_output,
+            "  static {class_name}* Deserialize(Buffer& buffer);"
         )
         .unwrap();
 
@@ -203,66 +340,93 @@ impl CppGenerator {
         &mut self,
         module: &OnyxModule,
         class_name: &String,
-        fields: &Vec<Field>,
+        field_groups: &Vec<Vec<&Field>>,
     ) {
         // Implementation of the Deserialize method
         writeln!(
             self.source_output,
-            "{class_name} {class_name}::Deserialize(Buffer& buffer) {{"
+            "{class_name}* {class_name}::Deserialize(Buffer& buffer) {{"
+        )
+        .unwrap();
+
+        writeln!(
+            self.source_output,
+            "  // Overlay the class structure onto the buffer memory. This is the zero-copy step."
         )
         .unwrap();
         writeln!(
             self.source_output,
-            "  {class_name}& packed = reinterpret_cast<{class_name}&>(buffer);"
+            "  {class_name}* result = ({class_name}*)buffer;"
         )
         .unwrap();
-        writeln!(self.source_output, "  return {class_name} {{").unwrap();
+        writeln!(self.source_output).unwrap();
 
-        // Iterate and deserialize field by field to handle both endianness and bit-fields
-        for field in fields {
-            // Only apply byteswap if it's NOT a bit-field and is a primitive type (custom types handle their own field deserialization)
-            if field.bit_field_size.is_none() {
-                match &field.type_info {
-                    Type::Primitive(p) if p.get_byte_size() > 8 => writeln!(
+        // Iterate and apply in-place swapping
+        for group in field_groups {
+            let first_field = group[0];
+            let name = &first_field.name;
+
+            if group.len() > 1 || first_field.bit_field_size.is_some() {
+                // CASE 1: Bit-Field Container (uint8_t __raw_{name}[N])
+                let bytes = first_field.get_bit_width(module).div_ceil(8);
+                if bytes > 1 {
+                    let container_type = match bytes {
+                        2 => "uint16_t",
+                        4 => "uint32_t",
+                        8 => "uint64_t",
+                        _ => "void",
+                    };
+                    writeln!(self.source_output, "  // SWAP: Bit-field container {name}").unwrap();
+                    writeln!(
                         self.source_output,
-                        "    util::byteswap_if_needed(packed.{name}),",
-                        name = field.name
+                        "  *({container_type}*)result->__raw_{name} = utils::byteswap_if_needed(*({container_type}*)result->__raw_{name});"
+                    ).unwrap();
+                } else {
+                    writeln!(
+                        self.source_output,
+                        "  // INFO: Bit-field container {name} (1 byte), no swap needed."
                     )
-                    .unwrap(),
-                    Type::Primitive(_) => {
-                        writeln!(self.source_output, "    packed.{name},", name = field.name)
-                            .unwrap()
-                    }
-                    Type::Custom(s) => {
-                        match module.definitions.get(s) {
-                            Some(def) => match def {
-                                Definition::Message(_) => writeln!(
-                                    self.source_output,
-                                    "    {s}::Deserialize(reinterpret_cast<{s}::Buffer&>(packed.{})),",
-                                    field.name
-                                )
-                                .unwrap(),
-                                Definition::Struct(_) => writeln!(
-                                    self.source_output,
-                                    "    {s}::Deserialize(reinterpret_cast<{s}::Buffer&>(packed.{})),",
-                                    field.name
-                                )
-                                .unwrap(),
-                                Definition::Enum(_) => {
-                                    writeln!(self.source_output, "    packed.{},", field.name)
-                                        .unwrap()
-                                }
-                            },
-                            None => todo!(),
-                        };
-                    }
+                    .unwrap();
                 }
             } else {
-                writeln!(self.source_output, "    packed.{name},", name = field.name).unwrap()
+                // CASE 2: Primitive or Custom Field (__raw_{name})
+                match &first_field.type_info {
+                    Type::Primitive(p) => {
+                        if p.get_bit_width().div_ceil(8) > 1 {
+                            // Primitive: In-place swap
+                            writeln!(self.source_output, "  // SWAP: Primitive field {name}")
+                                .unwrap();
+                            writeln!(
+                                self.source_output,
+                                "  result->__raw_{name} = utils::byteswap_if_needed(result->__raw_{name});"
+                            ).unwrap();
+                        } else {
+                            writeln!(
+                                self.source_output,
+                                "  // INFO: Primitive field {name} (1 byte), no swap needed."
+                            )
+                            .unwrap();
+                        }
+                    }
+                    Type::Custom(s) => {
+                        match module.definitions.get(s).unwrap() {
+                            Definition::Struct(_) | Definition::Message(_) => {
+                                writeln!(
+                                    self.source_output,
+                                    "  {s}::Deserialize(*({s}::Buffer*) &result->__raw_{name});"
+                                )
+                                .unwrap();
+                            }
+                            Definition::Enum(_) => {}
+                        }
+                        // Call Deserialize on the memory block where the nested struct resides
+                    }
+                }
             }
         }
 
-        writeln!(self.source_output, "  }};").unwrap();
+        writeln!(self.source_output).unwrap();
+        writeln!(self.source_output, "  return result;").unwrap();
         writeln!(self.source_output, "}}\n").unwrap();
     }
 
@@ -496,9 +660,10 @@ impl CodeGenerator for CppGenerator {
                             )));
                         }
                     };
-                    self.write_class_declaration(&s.name, &s.fields, struct_size);
+                    let groups = self.get_field_groups(&s.fields);
+                    self.write_class_declaration(&s.name, &groups, module, struct_size);
                     writeln!(self.header_output).unwrap();
-                    self.write_class_definition(module, &s.name, &s.fields);
+                    self.write_class_definition(module, &s.name, &groups);
                 }
                 Definition::Message(m) => {
                     let msg_size = match m.size {
@@ -510,9 +675,10 @@ impl CodeGenerator for CppGenerator {
                             )));
                         }
                     };
-                    self.write_class_declaration(&m.name, &m.fields, msg_size);
+                    let groups = self.get_field_groups(&m.fields);
+                    self.write_class_declaration(&m.name, &groups, module, msg_size);
                     writeln!(self.header_output).unwrap();
-                    self.write_class_definition(module, &m.name, &m.fields);
+                    self.write_class_definition(module, &m.name, &groups);
                 }
             }
         }

@@ -406,7 +406,9 @@ impl<'a> Parser<'a> {
                 let deepest_dep = match type_stack.pop() {
                     Some(id) => id,
                     None => {
-                        return Err(ParseError("Expected a custom type to be on the stack.".to_string()));
+                        return Err(ParseError(
+                            "Expected a custom type to be on the stack.".to_string(),
+                        ));
                     }
                 };
                 if !type_order.contains(&deepest_dep) {
