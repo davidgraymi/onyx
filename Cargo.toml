@@ -1,0 +1,12 @@
+[package]
+name = "onyx"
+version = "0.1.0"
+edition = "2024"
+authors = ["David Gray <davidgraymi@gmail.com.com>"]
+description = "A portable Interface Definition Language (IDL) compiler and code generator."
+readme = "README.md"
+repository = "https://github.com/davidgraymi/onyx"
+keywords = ["idl", "codegen", "serialization", "compiler"]
+categories = ["development-tools", "compilers"]
+
+[dependencies]
