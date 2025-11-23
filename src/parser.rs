@@ -9,6 +9,7 @@ use crate::{
     lexer::{Lexer, Token, TokenKind},
 };
 
+/// The `Parser` struct is responsible for parsing Onyx source code into an AST (`OnyxModule`).
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
     current_token: Token,
@@ -41,6 +42,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Checks if the current token matches an expected kind, consumes it, and advances.
+    /// Returns an error if the current token does not match the expected kind.
     fn consume(&mut self, expected: TokenKind) -> Result<(), ParseError> {
         if self.current_token.kind == expected {
             self.advance();
@@ -60,6 +62,9 @@ impl<'a> Parser<'a> {
     // --- Core Parsing Functions ---
 
     /// Parses the entire Onyx module.
+    ///
+    /// This is the main entry point for the parser. It parses top-level definitions
+    /// (endianness, messages, structs, enums) and resolves types and sizes.
     pub fn parse_module(mut self) -> Result<OnyxModule, ParseError> {
         let mut endianness_set = false;
 
@@ -94,6 +99,7 @@ impl<'a> Parser<'a> {
         self.resolve_module()
     }
 
+    /// Parses the endianness directive (e.g., `endian = big;`).
     fn parse_endianness_directive(&mut self) -> Result<WireEndianness, ParseError> {
         self.consume(TokenKind::Endianness)?;
         self.consume(TokenKind::Assign)?;
@@ -181,6 +187,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses a field definition inside a struct or message.
+    /// Handles optional bit-field syntax (e.g., `name type : bits`).
     fn parse_field(&mut self) -> Result<Field, ParseError> {
         let name = self.consume_identifier()?;
         let type_info = self.parse_type()?;
@@ -253,6 +260,7 @@ impl<'a> Parser<'a> {
 
     // --- Message and Struct Parsing ---
 
+    /// Parses the body of a struct or message (the fields inside braces).
     fn parse_struct_body(&mut self) -> Result<Vec<Field>, ParseError> {
         self.consume(TokenKind::OpenBrace)?;
         let mut fields = Vec::new();
@@ -267,6 +275,7 @@ impl<'a> Parser<'a> {
         Ok(fields)
     }
 
+    /// Parses a message definition.
     fn parse_message(&mut self) -> Result<Definition, ParseError> {
         self.consume(TokenKind::Message)?;
         let name = self.consume_identifier()?;
@@ -279,6 +288,7 @@ impl<'a> Parser<'a> {
         }))
     }
 
+    /// Parses a struct definition.
     fn parse_struct(&mut self) -> Result<Definition, ParseError> {
         self.consume(TokenKind::Struct)?;
         let name = self.consume_identifier()?;
@@ -293,6 +303,7 @@ impl<'a> Parser<'a> {
 
     // --- Enum Parsing ---
 
+    /// Parses an enum definition.
     fn parse_enum(&mut self) -> Result<Definition, ParseError> {
         self.consume(TokenKind::Enum)?;
         let name = self.consume_identifier()?;
@@ -348,6 +359,8 @@ impl<'a> Parser<'a> {
 
     // ------ Core resolving logic ------
 
+    /// Resolves the module by calculating sizes and determining definition order.
+    /// Handles circular dependency detection.
     fn resolve_module(mut self) -> Result<OnyxModule, ParseError> {
         let mut type_order: Vec<String> = Vec::new();
         let mut type_stack: Vec<String> = Vec::new();
@@ -388,6 +401,8 @@ impl<'a> Parser<'a> {
         Ok(self.module)
     }
 
+    /// Recursively calculates the size of a definition and populates `type_order`.
+    /// Detects circular dependencies using `type_stack`.
     fn resolve_type_calculate(
         &self,
         type_order: &mut Vec<String>,
@@ -444,7 +459,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // Also update resolve_fields to call resolve_type_calculate
+    /// Calculates the total size of a list of fields.
     fn resolve_fields_calculate(
         &self,
         type_order: &mut Vec<String>,
@@ -476,11 +491,112 @@ impl<'a> Parser<'a> {
     }
 }
 
-// A simple error type for parsing failures
+/// A simple error type for parsing failures.
 #[derive(Debug)]
 pub struct ParseError(pub String);
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}error{}: {}", color::RED, color::END, self.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_simple_struct() {
+        let source = "struct MyStruct { field1 u8, field2 u32, }";
+        let parser = Parser::new(source).unwrap();
+        let module = parser.parse_module().unwrap();
+
+        assert!(module.definitions.contains_key("MyStruct"));
+        if let Definition::Struct(s) = &module.definitions["MyStruct"] {
+            assert_eq!(s.name, "MyStruct");
+            assert_eq!(s.fields.len(), 2);
+            assert_eq!(s.fields[0].name, "field1");
+            assert_eq!(s.fields[1].name, "field2");
+            assert_eq!(s.size, Some(40)); // 8 + 32 = 40 bits
+        } else {
+            panic!("Expected Struct definition");
+        }
+    }
+
+    #[test]
+    fn test_parse_enum() {
+        let source = "enum MyEnum : u8 { A = 1, B, }";
+        let parser = Parser::new(source).unwrap();
+        let module = parser.parse_module().unwrap();
+
+        assert!(module.definitions.contains_key("MyEnum"));
+        if let Definition::Enum(e) = &module.definitions["MyEnum"] {
+            assert_eq!(e.name, "MyEnum");
+            assert_eq!(e.underlying_type, PrimitiveType::U8);
+            assert_eq!(e.variants.len(), 2);
+            assert_eq!(e.variants[0].name, "A");
+            assert_eq!(e.variants[0].value, Some(1));
+            assert_eq!(e.variants[1].name, "B");
+            assert_eq!(e.variants[1].value, None);
+        } else {
+            panic!("Expected Enum definition");
+        }
+    }
+
+    #[test]
+    fn test_parse_message() {
+        let source = "message MyMsg { id u64, }";
+        let parser = Parser::new(source).unwrap();
+        let module = parser.parse_module().unwrap();
+
+        assert!(module.definitions.contains_key("MyMsg"));
+        if let Definition::Message(m) = &module.definitions["MyMsg"] {
+            assert_eq!(m.name, "MyMsg");
+            assert_eq!(m.fields.len(), 1);
+            assert_eq!(m.size, Some(64));
+        } else {
+            panic!("Expected Message definition");
+        }
+    }
+
+    #[test]
+    fn test_endianness() {
+        let source = "endian = big struct S { f u8, }";
+        let parser = Parser::new(source).unwrap();
+        let module = parser.parse_module().unwrap();
+
+        assert_eq!(module.endianness, WireEndianness::Big);
+    }
+
+    #[test]
+    fn test_circular_dependency() {
+        let source = "struct A { b B, } struct B { a A, }";
+        let parser = Parser::new(source).unwrap();
+        let result = parser.parse_module();
+
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        assert!(err.0.contains("circular dependency detected"));
+    }
+
+    #[test]
+    fn test_duplicate_definition() {
+        let source = "struct A { f u8, } struct A { f u8, }";
+        let parser = Parser::new(source).unwrap();
+        let result = parser.parse_module();
+
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        assert!(err.0.contains("already exists"));
+    }
+
+    #[test]
+    fn test_bit_field_too_large() {
+        let source = "struct A { f u8 : 9, }";
+        let parser = Parser::new(source).unwrap();
+        let result = parser.parse_module();
+
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        assert!(err.0.contains("exceeds type"));
     }
 }

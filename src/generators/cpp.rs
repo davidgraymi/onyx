@@ -28,6 +28,9 @@ impl CppConfig {
 }
 
 #[derive(Debug, Default)]
+/// The C++ code generator.
+///
+/// Generates a header (.hpp) and source (.cpp) file for the given Onyx module.
 pub struct CppGenerator {
     config: CppConfig,
     header_output: String,
@@ -42,6 +45,8 @@ impl CppGenerator {
     const NETWORK_ENDIAN_DEFINE: &str = "ONYX_NETWORK_ORDER";
     const HOST_ENDIAN_DEFINE: &str = "ONYX_HOST_ORDER";
 
+    /// Adds a file path to the generator configuration.
+    /// This path is used to determine the output filename and the include guard.
     pub fn add_file_path(&mut self, file_path: PathBuf) -> Result<(), CompileError> {
         self.file_path = file_path;
         self.file_stem = match self.file_path.file_stem() {
@@ -51,6 +56,7 @@ impl CppGenerator {
         Ok(())
     }
 
+    /// Generates a define string based on the file stem (e.g., "EXAMPLE_ONYX").
     fn file_stem_define(&self) -> String {
         self.file_path
             .to_string_lossy()
@@ -59,6 +65,7 @@ impl CppGenerator {
             .replace("/", "_")
             .replace("\\", "_")
             .replace("-", "_")
+            .replace(".", "_")
     }
 
     /// Maps Onyx PrimitiveType to C++ type strings.
@@ -966,5 +973,64 @@ impl CodeGenerator for CppGenerator {
                 self.source_output.clone(),
             ),
         ])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cpp_config_indent() {
+        let config = CppConfig { indent_spaces: 2 };
+        assert_eq!(config.get_indent(0), "");
+        assert_eq!(config.get_indent(1), "  ");
+        assert_eq!(config.get_indent(2), "    ");
+    }
+
+    #[test]
+    fn test_file_stem_define() {
+        let mut generator = CppGenerator::default();
+        generator
+            .add_file_path(PathBuf::from("path/to/file.onyx"))
+            .unwrap();
+        // Note: The implementation includes the full path in the define, replacing separators
+        // This test assumes a unix-style path for simplicity in the expected string,
+        // but the implementation uses MAIN_SEPARATOR.
+        let define = generator.file_stem_define();
+        assert!(define.contains("PATH_TO_FILE_ONYX"));
+    }
+
+    #[test]
+    fn test_primitive_mapping() {
+        let generator = CppGenerator::default();
+        assert_eq!(
+            generator.map_primitive_type_to_cpp(&PrimitiveType::U8),
+            "uint8_t"
+        );
+        assert_eq!(
+            generator.map_primitive_type_to_cpp(&PrimitiveType::F64),
+            "double"
+        );
+        assert_eq!(
+            generator.map_primitive_type_to_cpp(&PrimitiveType::Bool),
+            "bool"
+        );
+    }
+
+    #[test]
+    fn test_byte_width_mapping() {
+        let generator = CppGenerator::default();
+        assert_eq!(generator.map_byte_width_to_cpp(&1), "uint8_t");
+        assert_eq!(generator.map_byte_width_to_cpp(&2), "uint16_t");
+        assert_eq!(generator.map_byte_width_to_cpp(&4), "uint32_t");
+        assert_eq!(generator.map_byte_width_to_cpp(&8), "uint64_t");
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_byte_width_mapping_invalid() {
+        let generator = CppGenerator::default();
+        generator.map_byte_width_to_cpp(&9);
     }
 }
