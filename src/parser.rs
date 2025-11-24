@@ -364,36 +364,29 @@ impl<'a> Parser<'a> {
     fn resolve_module(mut self) -> Result<OnyxModule, ParseError> {
         let mut type_order: Vec<String> = Vec::new();
         let mut type_stack: Vec<String> = Vec::new();
-
-        // Use a standard `for` loop over mutable values instead of iteration helper
-        // to avoid complex lifetime issues and allow using 'id' in the error message.
-        // We will store the calculated size in a temporary map.
-        let mut calculated_sizes = HashMap::new();
+        let mut calculated_sizes: HashMap<String, usize> = HashMap::new();
 
         // Pass 1: Calculate sizes (iterate IMMUTABLY)
         for (id, def) in &self.module.definitions {
-            // NOTE: The `resolve_type` must be able to calculate and return the size
-            // without needing to mutate the definition, otherwise we run into the
-            // same borrow issue. It looks like resolve_type is *not* supposed to
-            // mutate, but rather calculate recursively.
-
-            // The original logic required calculating size recursively and *then* // assigning it. Let's separate the calculation from the assignment.
-
-            // 1. Clear type_stack for each top-level definition resolution
             type_stack.clear();
-
-            // 2. Call the original resolve_type (which now just *calculates*)
-            let size = self.resolve_type_calculate(&mut type_order, &mut type_stack, def)?;
-            calculated_sizes.insert(id.clone(), size);
+            if !calculated_sizes.contains_key(id) {
+                self.resolve_type_calculate(
+                    &mut type_order,
+                    &mut type_stack,
+                    &mut calculated_sizes,
+                    def,
+                )?;
+            }
         }
 
         // Pass 2: Assign sizes (iterate MUTABLY)
         for (id, def) in self.module.definitions.iter_mut() {
-            let size = calculated_sizes[id]; // Safe to unwrap since we just calculated them
-            match def {
-                Definition::Message(message_def) => message_def.size = Some(size),
-                Definition::Struct(struct_def) => struct_def.size = Some(size),
-                Definition::Enum(_) => {}
+            if let Some(&size) = calculated_sizes.get(id) {
+                match def {
+                    Definition::Message(message_def) => message_def.size = Some(size),
+                    Definition::Struct(struct_def) => struct_def.size = Some(size),
+                    Definition::Enum(_) => {}
+                }
             }
         }
 
@@ -407,13 +400,20 @@ impl<'a> Parser<'a> {
         &self,
         type_order: &mut Vec<String>,
         type_stack: &mut Vec<String>,
+        calculated_sizes: &mut HashMap<String, usize>,
         def: &Definition,
     ) -> Result<usize, ParseError> {
+        // If already calculated, return the size
+        if let Some(&size) = calculated_sizes.get(def.name()) {
+            return Ok(size);
+        }
+
         match def.size() {
             Some(size) => {
                 if !type_order.contains(&def.name().to_string()) {
                     type_order.push(def.name().to_string());
                 }
+                calculated_sizes.insert(def.name().to_string(), size);
                 Ok(size)
             }
             None => {
@@ -432,12 +432,18 @@ impl<'a> Parser<'a> {
                 type_stack.push(def.name().to_string());
 
                 let calculated_size = match def {
-                    Definition::Struct(s) => {
-                        self.resolve_fields_calculate(type_order, type_stack, &s.fields)
-                    }
-                    Definition::Message(m) => {
-                        self.resolve_fields_calculate(type_order, type_stack, &m.fields)
-                    }
+                    Definition::Struct(s) => self.resolve_fields_calculate(
+                        type_order,
+                        type_stack,
+                        calculated_sizes,
+                        &s.fields,
+                    ),
+                    Definition::Message(m) => self.resolve_fields_calculate(
+                        type_order,
+                        type_stack,
+                        calculated_sizes,
+                        &m.fields,
+                    ),
                     // Enums are resolved during field resolution, not here
                     _ => Err(ParseError("unexpected error!".to_string())),
                 }?;
@@ -454,6 +460,7 @@ impl<'a> Parser<'a> {
                     type_order.push(deepest_dep);
                 }
 
+                calculated_sizes.insert(def.name().to_string(), calculated_size);
                 Ok(calculated_size)
             }
         }
@@ -464,6 +471,7 @@ impl<'a> Parser<'a> {
         &self,
         type_order: &mut Vec<String>,
         type_stack: &mut Vec<String>,
+        calculated_sizes: &mut HashMap<String, usize>,
         fields: &Vec<Field>,
     ) -> Result<usize, ParseError> {
         let mut total_size = 0;
@@ -475,7 +483,12 @@ impl<'a> Parser<'a> {
                     Type::Custom(custom_name) => {
                         if let Some(target_def) = self.module.definitions.get(custom_name) {
                             // Recursively call type resolution to understand circular dependencies
-                            self.resolve_type_calculate(type_order, type_stack, target_def)?
+                            self.resolve_type_calculate(
+                                type_order,
+                                type_stack,
+                                calculated_sizes,
+                                target_def,
+                            )?
                         } else {
                             // You had an incomplete error message here
                             return Err(ParseError(format!(
@@ -598,5 +611,14 @@ mod tests {
         assert!(result.is_err());
         let err = result.err().unwrap();
         assert!(err.0.contains("exceeds type"));
+    }
+
+    #[test]
+    fn undefined_type() {
+        let source = "message A { hdr B, }";
+
+        let parser = Parser::new(source).unwrap();
+        let result = parser.parse_module();
+        assert!(result.is_err());
     }
 }

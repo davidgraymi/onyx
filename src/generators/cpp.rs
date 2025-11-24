@@ -225,7 +225,30 @@ impl CppGenerator {
         writeln!(self.header_output, "class {class_name} {{").unwrap();
         writeln!(self.header_output, "private:").unwrap();
 
-        // Declare members (fields)
+        self.write_class_members(field_groups, module);
+
+        // Public accessors
+        writeln!(self.header_output, "\npublic:").unwrap();
+        writeln!(
+            self.header_output,
+            "{}static const size_t kSizeOf = {size};",
+            self.config.get_indent(1)
+        )
+        .unwrap();
+        writeln!(
+            self.header_output,
+            "{}using Buffer = uint8_t[kSizeOf];\n",
+            self.config.get_indent(1)
+        )
+        .unwrap();
+
+        self.write_class_accessors(field_groups, module);
+        self.write_class_method_declarations(class_name);
+
+        writeln!(self.header_output, "}};").unwrap();
+    }
+
+    fn write_class_members(&mut self, field_groups: &Vec<Vec<&Field>>, module: &OnyxModule) {
         for group in field_groups {
             let first_field = group[0];
             let mut container_bits = 0;
@@ -255,145 +278,143 @@ impl CppGenerator {
                 .unwrap();
             }
         }
+    }
 
-        // Public accessors
-        writeln!(self.header_output, "\npublic:").unwrap();
-        writeln!(
-            self.header_output,
-            "{}static const size_t kSizeOf = {size};",
-            self.config.get_indent(1)
-        )
-        .unwrap();
-        writeln!(
-            self.header_output,
-            "{}using Buffer = uint8_t[kSizeOf];\n",
-            self.config.get_indent(1)
-        )
-        .unwrap();
-
-        // Generate Public Accessors for Bit-Field Groups
+    fn write_class_accessors(&mut self, field_groups: &Vec<Vec<&Field>>, module: &OnyxModule) {
         for group in field_groups {
             let first_field = group[0];
             if group.len() > 1 || first_field.bit_field_size.is_some() {
-                // It's a bit-field group, generate portable accessors
-                let container_name = format!("__raw_{}", first_field.name);
-
-                let mut current_bit_offset: usize = 0;
-
-                for field in group {
-                    let field_type_str = self.get_primitive_cpp_type(&field.type_info);
-                    let bits = field.bit_field_size.unwrap_or(0);
-                    let mask = (1u64 << bits).saturating_sub(1);
-                    let current_byte_offset = current_bit_offset / 8;
-                    let local_bit_offset = current_bit_offset % 8;
-                    let temp_bit_width = local_bit_offset + bits;
-                    let temp_byte_width = temp_bit_width.div_ceil(8);
-                    let temp_container = self.map_byte_width_to_cpp(&temp_byte_width);
-
-                    // Accessor logic
-                    writeln!(
-                        self.header_output,
-                        "{}/// Accessor for {field_name}",
-                        self.config.get_indent(1),
-                        field_name = field.name
-                    )
-                    .unwrap();
-                    writeln!(
-                        self.header_output,
-                        "{}inline const {field_type_str} {field_name}() const {{",
-                        self.config.get_indent(1),
-                        field_name = field.name,
-                    )
-                    .unwrap();
-                    writeln!(
-                        self.header_output,
-                        "{}auto raw_value = reinterpret_cast<const {temp_container}*>(&{container_name}[{current_byte_offset}]);", self.config.get_indent(2)
-                    ).unwrap();
-                    writeln!(
-                        self.header_output,
-                        "{}return static_cast<const {field_type_str}>(((*raw_value >> {current_bit_offset}) & 0x{mask:X}));", self.config.get_indent(2)
-                    )
-                    .unwrap();
-                    writeln!(self.header_output, "{}}}\n", self.config.get_indent(1)).unwrap();
-
-                    // Mutator logic
-                    writeln!(
-                        self.header_output,
-                        "{}/// Mutator for {field_name}",
-                        self.config.get_indent(1),
-                        field_name = field.name
-                    )
-                    .unwrap();
-                    writeln!(
-                        self.header_output,
-                        "{}inline void {field_name}({field_type_str} value) {{",
-                        self.config.get_indent(1),
-                        field_name = field.name
-                    )
-                    .unwrap();
-                    writeln!(self.header_output, "{}auto raw_container = reinterpret_cast<{temp_container}*>(&{container_name}[{current_byte_offset}]);", self.config.get_indent(2)).unwrap();
-                    writeln!(self.header_output,"{}*raw_container &= ~((({temp_container})0x{mask:X}) << {current_bit_offset});", self.config.get_indent(2)).unwrap();
-                    writeln!(self.header_output,"{}*raw_container |= (((({temp_container})value) & 0x{mask:X}) << {current_bit_offset});", self.config.get_indent(2)).unwrap();
-                    writeln!(self.header_output, "{}}}\n", self.config.get_indent(1)).unwrap();
-
-                    current_bit_offset += bits;
-                }
+                self.write_bitfield_accessors(group);
             } else {
-                // Non-Bit-Field
-                let field = group[0];
-                let type_str = self.get_primitive_cpp_type(&field.type_info);
-                let is_class = match &field.type_info {
-                    Type::Custom(s) => matches!(
-                        module.definitions.get(s),
-                        Some(Definition::Struct(_)) | Some(Definition::Message(_))
-                    ),
-                    _ => false,
-                };
-                let accessor_const = if is_class {
-                    String::new()
-                } else {
-                    "const ".to_string()
-                };
-                let pass_by_ref = if is_class {
-                    "&".to_string()
-                } else {
-                    String::new()
-                };
-
-                // Accessor
-                writeln!(
-                    self.header_output,
-                    "{}/// Accessor for {name}",
-                    self.config.get_indent(1),
-                    name = field.name
-                )
-                .unwrap();
-                writeln!(
-                    self.header_output,
-                    "{}inline {accessor_const}{type_str}{pass_by_ref} {name}() {accessor_const}{{ return __raw_{name}; }}\n",
-                    self.config.get_indent(1),
-                    name = field.name
-                )
-                .unwrap();
-
-                // Mutator
-                writeln!(
-                    self.header_output,
-                    "{}/// Mutator for {name}",
-                    self.config.get_indent(1),
-                    name = field.name
-                )
-                .unwrap();
-                writeln!(
-                    self.header_output,
-                    "{}inline void {name}(const {type_str} value) {{ __raw_{name} = value; }}\n",
-                    self.config.get_indent(1),
-                    name = field.name
-                )
-                .unwrap();
+                self.write_regular_accessor(group[0], module);
             }
         }
+    }
 
+    fn write_bitfield_accessors(&mut self, group: &Vec<&Field>) {
+        let first_field = group[0];
+        let container_name = format!("__raw_{}", first_field.name);
+        let mut current_bit_offset: usize = 0;
+
+        for field in group {
+            let field_type_str = self.get_primitive_cpp_type(&field.type_info);
+            let bits = field.bit_field_size.unwrap_or(0);
+            let mask = (1u64 << bits).saturating_sub(1);
+            let current_byte_offset = current_bit_offset / 8;
+            let local_bit_offset = current_bit_offset % 8;
+            let temp_bit_width = local_bit_offset + bits;
+            let temp_byte_width = temp_bit_width.div_ceil(8);
+            let temp_container = self.map_byte_width_to_cpp(&temp_byte_width);
+
+            // Accessor logic
+            writeln!(
+                self.header_output,
+                "{}/// Accessor for {field_name}",
+                self.config.get_indent(1),
+                field_name = field.name
+            )
+            .unwrap();
+            writeln!(
+                self.header_output,
+                "{}inline const {field_type_str} {field_name}() const {{",
+                self.config.get_indent(1),
+                field_name = field.name,
+            )
+            .unwrap();
+            writeln!(
+                self.header_output,
+                "{}auto raw_value = reinterpret_cast<const {temp_container}*>(&{container_name}[{current_byte_offset}]);", self.config.get_indent(2)
+            ).unwrap();
+            writeln!(
+                self.header_output,
+                "{}return static_cast<const {field_type_str}>(((*raw_value >> {current_bit_offset}) & 0x{mask:X}));", self.config.get_indent(2)
+            )
+            .unwrap();
+            writeln!(self.header_output, "{}}}\n", self.config.get_indent(1)).unwrap();
+
+            // Mutator logic
+            writeln!(
+                self.header_output,
+                "{}/// Mutator for {field_name}",
+                self.config.get_indent(1),
+                field_name = field.name
+            )
+            .unwrap();
+            writeln!(
+                self.header_output,
+                "{}inline void {field_name}({field_type_str} value) {{",
+                self.config.get_indent(1),
+                field_name = field.name
+            )
+            .unwrap();
+            writeln!(self.header_output, "{}auto raw_container = reinterpret_cast<{temp_container}*>(&{container_name}[{current_byte_offset}]);", self.config.get_indent(2)).unwrap();
+            writeln!(
+                self.header_output,
+                "{}*raw_container &= ~((({temp_container})0x{mask:X}) << {current_bit_offset});",
+                self.config.get_indent(2)
+            )
+            .unwrap();
+            writeln!(self.header_output,"{}*raw_container |= (((({temp_container})value) & 0x{mask:X}) << {current_bit_offset});", self.config.get_indent(2)).unwrap();
+            writeln!(self.header_output, "{}}}\n", self.config.get_indent(1)).unwrap();
+
+            current_bit_offset += bits;
+        }
+    }
+
+    fn write_regular_accessor(&mut self, field: &Field, module: &OnyxModule) {
+        let type_str = self.get_primitive_cpp_type(&field.type_info);
+        let is_class = match &field.type_info {
+            Type::Custom(s) => matches!(
+                module.definitions.get(s),
+                Some(Definition::Struct(_)) | Some(Definition::Message(_))
+            ),
+            _ => false,
+        };
+        let accessor_const = if is_class {
+            String::new()
+        } else {
+            "const ".to_string()
+        };
+        let pass_by_ref = if is_class {
+            "&".to_string()
+        } else {
+            String::new()
+        };
+
+        // Accessor
+        writeln!(
+            self.header_output,
+            "{}/// Accessor for {name}",
+            self.config.get_indent(1),
+            name = field.name
+        )
+        .unwrap();
+        writeln!(
+            self.header_output,
+            "{}inline {accessor_const}{type_str}{pass_by_ref} {name}() {accessor_const}{{ return __raw_{name}; }}\n",
+            self.config.get_indent(1),
+            name = field.name
+        )
+        .unwrap();
+
+        // Mutator
+        writeln!(
+            self.header_output,
+            "{}/// Mutator for {name}",
+            self.config.get_indent(1),
+            name = field.name
+        )
+        .unwrap();
+        writeln!(
+            self.header_output,
+            "{}inline void {name}(const {type_str} value) {{ __raw_{name} = value; }}\n",
+            self.config.get_indent(1),
+            name = field.name
+        )
+        .unwrap();
+    }
+
+    fn write_class_method_declarations(&mut self, class_name: &String) {
         // Declare the static deserialization method
         writeln!(
             self.header_output,
@@ -446,11 +467,19 @@ impl CppGenerator {
             self.config.get_indent(1)
         )
         .unwrap();
-
-        writeln!(self.header_output, "}};").unwrap();
     }
 
     fn write_class_definition(
+        &mut self,
+        module: &OnyxModule,
+        class_name: &String,
+        field_groups: &Vec<Vec<&Field>>,
+    ) {
+        self.write_deserialize_impl(module, class_name, field_groups);
+        self.write_serialize_impl(module, class_name, field_groups);
+    }
+
+    fn write_deserialize_impl(
         &mut self,
         module: &OnyxModule,
         class_name: &String,
@@ -562,7 +591,14 @@ impl CppGenerator {
         )
         .unwrap();
         writeln!(self.source_output, "}}\n").unwrap();
+    }
 
+    fn write_serialize_impl(
+        &mut self,
+        module: &OnyxModule,
+        class_name: &String,
+        field_groups: &Vec<Vec<&Field>>,
+    ) {
         // Implementation of the Serialize method
         writeln!(
             self.source_output,

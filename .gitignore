@@ -1,4 +1,5 @@
 /target
 /examples/data
-/tests/data
+/tests/output_rust
+/tests/output_cpp
 a.out

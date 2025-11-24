@@ -4,6 +4,7 @@ use crate::ast::OnyxModule;
 
 pub mod cpp;
 pub mod py;
+pub mod rust;
 
 /// A trait for code generators that translate the Onyx AST into target language code.
 pub trait CodeGenerator {
